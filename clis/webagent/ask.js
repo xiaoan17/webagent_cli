@@ -27,8 +27,11 @@ export const askCommand = cli({
         { name: 'new', type: 'boolean', default: true, help: 'Start a new session when --id is not provided (default: true)' },
         { name: 'project-id', help: 'Optional WebAgent project_id to attach to a new session' },
         { name: 'agent-type', default: 'opencode', help: 'WebAgent config.agent_type for new sessions (default: opencode)' },
+        { name: 'file', valueRequired: true, help: 'Attach a local file' },
+        { name: 'data', valueRequired: true, help: 'Attach inline text data as a generated .txt file' },
+        { name: 'data-file', valueRequired: true, help: 'Attach a local data file' },
     ],
-    columns: ['response', 'session_id', 'url'],
+    columns: ['response', 'session_id', 'url', 'files'],
     func: async (page, kwargs) => {
         const prompt = requireNonEmptyPrompt(kwargs.prompt, 'webagent');
         const timeoutSeconds = requirePositiveInt(
@@ -45,17 +48,26 @@ export const askCommand = cli({
             );
         }
         const result = id
-            ? await sendToSession(page, id, prompt, { timeoutSeconds })
+            ? await sendToSession(page, id, prompt, {
+                timeoutSeconds,
+                files: kwargs.file,
+                data: kwargs.data,
+                dataFiles: kwargs['data-file'],
+            })
             : await createSession(page, prompt, {
                 timeoutSeconds,
                 projectId: kwargs['project-id'],
                 agentType: kwargs['agent-type'] || 'opencode',
+                files: kwargs.file,
+                data: kwargs.data,
+                dataFiles: kwargs['data-file'],
             });
         const response = ensureAssistantResponse(result, 'webagent ask');
         return [{
             response,
             session_id: result.sessionId || null,
             url: result.sessionId ? `https://agent.famou.com/chat/${result.sessionId}` : null,
+            files: result.files?.map((file) => file.name).join(', ') || null,
         }];
     },
 });

@@ -8,6 +8,7 @@ import './detail.js';
 import './new.js';
 import './status.js';
 import './cancel.js';
+import './projects.js';
 
 describe('webagent command registration', () => {
     it('registers WebAgent browser commands with persistent cookie sessions', () => {
@@ -20,6 +21,7 @@ describe('webagent command registration', () => {
             new: 'write',
             status: 'read',
             cancel: 'write',
+            projects: 'read',
         };
 
         for (const [name, access] of Object.entries(expectedAccess)) {
@@ -43,7 +45,19 @@ describe('webagent command registration', () => {
             expect.objectContaining({ name: 'id' }),
             expect.objectContaining({ name: 'project-id' }),
             expect.objectContaining({ name: 'agent-type', default: 'opencode' }),
+            expect.objectContaining({ name: 'file', valueRequired: true }),
+            expect.objectContaining({ name: 'data', valueRequired: true }),
+            expect.objectContaining({ name: 'data-file', valueRequired: true }),
         ]));
-        expect(ask.columns).toEqual(['response', 'session_id', 'url']);
+        expect(ask.columns).toEqual(['response', 'session_id', 'url', 'files']);
+    });
+
+    it('keeps runtime-visible arguments for projects', () => {
+        const projects = getRegistry().get('webagent/projects');
+        expect(projects.args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'limit', type: 'int', default: 100 }),
+            expect.objectContaining({ name: 'page', type: 'int', default: 1 }),
+        ]));
+        expect(projects.columns).toEqual(['index', 'name', 'id', 'file_count', 'skill_count', 'task_count', 'created_at', 'file_limit', 'size_limit']);
     });
 });

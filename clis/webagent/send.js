@@ -20,8 +20,11 @@ export const sendCommand = cli({
         { name: 'id', positional: true, required: true, help: 'WebAgent session ID or https://agent.famou.com/chat/<id> URL' },
         { name: 'prompt', positional: true, required: true, help: 'Prompt to send' },
         { name: 'timeout', type: 'int', default: 120, help: 'Max seconds to keep the stream open (default: 120)' },
+        { name: 'file', valueRequired: true, help: 'Attach a local file' },
+        { name: 'data', valueRequired: true, help: 'Attach inline text data as a generated .txt file' },
+        { name: 'data-file', valueRequired: true, help: 'Attach a local data file' },
     ],
-    columns: ['status', 'session_id', 'response'],
+    columns: ['status', 'session_id', 'response', 'files'],
     func: async (page, kwargs) => {
         const prompt = requireNonEmptyPrompt(kwargs.prompt, 'webagent');
         const timeoutSeconds = requirePositiveInt(
@@ -29,11 +32,17 @@ export const sendCommand = cli({
             'webagent send --timeout',
             'Example: opencli webagent send <id> "continue" --timeout 120',
         );
-        const result = await sendToSession(page, kwargs.id, prompt, { timeoutSeconds });
+        const result = await sendToSession(page, kwargs.id, prompt, {
+            timeoutSeconds,
+            files: kwargs.file,
+            data: kwargs.data,
+            dataFiles: kwargs['data-file'],
+        });
         return [{
             status: result.status || 'sent',
             session_id: result.sessionId || kwargs.id,
             response: result.response || null,
+            files: result.files?.map((file) => file.name).join(', ') || null,
         }];
     },
 });

@@ -24488,12 +24488,34 @@
         "default": "opencode",
         "required": false,
         "help": "WebAgent config.agent_type for new sessions (default: opencode)"
+      },
+      {
+        "name": "file",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Attach a local file"
+      },
+      {
+        "name": "data",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Attach inline text data as a generated .txt file"
+      },
+      {
+        "name": "data-file",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Attach a local data file"
       }
     ],
     "columns": [
       "response",
       "session_id",
-      "url"
+      "url",
+      "files"
     ],
     "type": "js",
     "modulePath": "webagent/ask.js",
@@ -24621,6 +24643,47 @@
   },
   {
     "site": "webagent",
+    "name": "projects",
+    "description": "List WebAgent projects",
+    "access": "read",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "limit",
+        "type": "int",
+        "default": 100,
+        "required": false,
+        "help": "Max projects to list (default: 100)"
+      },
+      {
+        "name": "page",
+        "type": "int",
+        "default": 1,
+        "required": false,
+        "help": "Project page number (default: 1)"
+      }
+    ],
+    "columns": [
+      "index",
+      "name",
+      "id",
+      "file_count",
+      "skill_count",
+      "task_count",
+      "created_at",
+      "file_limit",
+      "size_limit"
+    ],
+    "type": "js",
+    "modulePath": "webagent/projects.js",
+    "sourceFile": "webagent/projects.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
     "name": "read",
     "description": "Read the current WebAgent session from the browser URL",
     "access": "read",
@@ -24675,12 +24738,34 @@
         "default": 120,
         "required": false,
         "help": "Max seconds to keep the stream open (default: 120)"
+      },
+      {
+        "name": "file",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Attach a local file"
+      },
+      {
+        "name": "data",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Attach inline text data as a generated .txt file"
+      },
+      {
+        "name": "data-file",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Attach a local data file"
       }
     ],
     "columns": [
       "status",
       "session_id",
-      "response"
+      "response",
+      "files"
     ],
     "type": "js",
     "modulePath": "webagent/send.js",
