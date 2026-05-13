@@ -24441,6 +24441,276 @@
     "navigateBefore": false
   },
   {
+    "site": "webagent",
+    "name": "ask",
+    "description": "Send a prompt to WebAgent and wait for the response",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "prompt",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Prompt to send to WebAgent"
+      },
+      {
+        "name": "id",
+        "type": "str",
+        "required": false,
+        "help": "Continue an existing WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      },
+      {
+        "name": "timeout",
+        "type": "int",
+        "default": 120,
+        "required": false,
+        "help": "Max seconds to wait for response (default: 120)"
+      },
+      {
+        "name": "new",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "help": "Start a new session when --id is not provided (default: true)"
+      },
+      {
+        "name": "project-id",
+        "type": "str",
+        "required": false,
+        "help": "Optional WebAgent project_id to attach to a new session"
+      },
+      {
+        "name": "agent-type",
+        "type": "str",
+        "default": "opencode",
+        "required": false,
+        "help": "WebAgent config.agent_type for new sessions (default: opencode)"
+      }
+    ],
+    "columns": [
+      "response",
+      "session_id",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "webagent/ask.js",
+    "sourceFile": "webagent/ask.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "cancel",
+    "description": "Cancel a running WebAgent session",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      }
+    ],
+    "columns": [
+      "status",
+      "session_id"
+    ],
+    "type": "js",
+    "modulePath": "webagent/cancel.js",
+    "sourceFile": "webagent/cancel.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "detail",
+    "description": "Read a WebAgent session by ID or URL",
+    "access": "read",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      },
+      {
+        "name": "turns",
+        "type": "int",
+        "default": 10,
+        "required": false,
+        "help": "Number of recent turns to fetch (default: 10)"
+      }
+    ],
+    "columns": [
+      "role",
+      "text"
+    ],
+    "type": "js",
+    "modulePath": "webagent/detail.js",
+    "sourceFile": "webagent/detail.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "history",
+    "description": "List recent WebAgent sessions",
+    "access": "read",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "limit",
+        "type": "int",
+        "default": 20,
+        "required": false,
+        "help": "Max sessions to list (default: 20)"
+      },
+      {
+        "name": "page",
+        "type": "int",
+        "default": 1,
+        "required": false,
+        "help": "History page number (default: 1)"
+      }
+    ],
+    "columns": [
+      "index",
+      "title",
+      "id",
+      "status",
+      "updated_at",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "webagent/history.js",
+    "sourceFile": "webagent/history.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "new",
+    "description": "Open the WebAgent workspace for a new task",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [],
+    "columns": [
+      "status",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "webagent/new.js",
+    "sourceFile": "webagent/new.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "read",
+    "description": "Read the current WebAgent session from the browser URL",
+    "access": "read",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "turns",
+        "type": "int",
+        "default": 10,
+        "required": false,
+        "help": "Number of recent turns to fetch (default: 10)"
+      }
+    ],
+    "columns": [
+      "role",
+      "text"
+    ],
+    "type": "js",
+    "modulePath": "webagent/read.js",
+    "sourceFile": "webagent/read.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "send",
+    "description": "Send a prompt to an existing WebAgent session",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      },
+      {
+        "name": "prompt",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Prompt to send"
+      },
+      {
+        "name": "timeout",
+        "type": "int",
+        "default": 120,
+        "required": false,
+        "help": "Max seconds to keep the stream open (default: 120)"
+      }
+    ],
+    "columns": [
+      "status",
+      "session_id",
+      "response"
+    ],
+    "type": "js",
+    "modulePath": "webagent/send.js",
+    "sourceFile": "webagent/send.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "status",
+    "description": "Check WebAgent page availability, login state, and current session",
+    "access": "read",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [],
+    "columns": [
+      "status",
+      "login",
+      "user",
+      "session_id",
+      "url"
+    ],
+    "type": "js",
+    "modulePath": "webagent/status.js",
+    "sourceFile": "webagent/status.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
     "site": "weibo",
     "name": "comments",
     "description": "Get comments on a Weibo post",
