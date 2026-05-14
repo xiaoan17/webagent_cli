@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
     buildClarificationSubmission,
+    cleanWebAgentText,
     extractClarificationFromText,
     extractAssistantTextFromEvents,
+    extractArtifactsFromText,
+    extractEvolutionSuggestionFromText,
     findLatestClarification,
     isSessionDoneStatus,
     normalizeSessionMessages,
+    parseWebAgentFeedback,
     parseSessionId,
     parseSseEvents,
+    receiptOutputFields,
     __test__,
 } from './utils.js';
 
@@ -302,5 +307,56 @@ describe('webagent utils', () => {
                 questions: [expect.objectContaining({ label: '目标', default: '是' })],
             }),
         }));
+    });
+
+    it('parses WebAgent receipts with artifacts and evolution suggestions', () => {
+        const text = [
+            '任务完成。',
+            '<evolve>',
+            '{"reasons":["可优化路径","可尝试演化算法"]}',
+            '</evolve>',
+            '<artifacts>[{"name":"summary.csv","path":"https://example.com/summary.csv","size":311,"fileId":"f1"}]</artifacts>',
+        ].join('\n');
+        const feedback = parseWebAgentFeedback(text);
+        expect(feedback.cleanText).toBe('任务完成。');
+        expect(feedback.evolution).toEqual({
+            available: true,
+            reasons: ['可优化路径', '可尝试演化算法'],
+        });
+        expect(feedback.artifacts).toEqual([{
+            name: 'summary.csv',
+            url: 'https://example.com/summary.csv',
+            size: 311,
+            size_text: '311B',
+            file_id: 'f1',
+        }]);
+        expect(receiptOutputFields('sess12345678', feedback)).toEqual(expect.objectContaining({
+            url: 'https://agent.famou.com/chat/sess12345678',
+            receipt: '1 artifacts, deep_evolution_available',
+            artifacts: 'summary.csv (311B): https://example.com/summary.csv',
+            evolve: '1. 可优化路径\n2. 可尝试演化算法',
+            next_actions: [
+                'webagent receipt sess12345678',
+                'webagent evolve sess12345678',
+                'webagent evolve sess12345678 --later',
+            ].join('\n'),
+        }));
+    });
+
+    it('handles receipt tags independently', () => {
+        expect(cleanWebAgentText('A<thinking>x</thinking><evolve>{"reasons":["r"]}</evolve><artifacts>[]</artifacts>')).toBe('A');
+        expect(extractEvolutionSuggestionFromText('<evolve>{"result":["r1"]}</evolve>')).toEqual({
+            available: true,
+            reasons: ['r1'],
+        });
+        expect(extractArtifactsFromText('<artifacts>{"files":[{"fileName":"a.txt","url":"https://e/a.txt"}]}</artifacts>')[0])
+            .toEqual(expect.objectContaining({ name: 'a.txt', url: 'https://e/a.txt' }));
+        expect(__test__.latestAssistantMessage({
+            messages: [
+                { role: 'assistant', text: 'old' },
+                { role: 'user', text: 'next' },
+                { role: 'assistant', text: 'new' },
+            ],
+        })).toEqual({ role: 'assistant', text: 'new' });
     });
 });

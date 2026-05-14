@@ -10,6 +10,8 @@ import './status.js';
 import './cancel.js';
 import './projects.js';
 import './clarify.js';
+import './receipt.js';
+import './evolve.js';
 import './rename.js';
 import './delete.js';
 import './share.js';
@@ -33,6 +35,8 @@ describe('webagent command registration', () => {
             cancel: 'write',
             projects: 'read',
             clarify: 'write',
+            receipt: 'read',
+            evolve: 'write',
             rename: 'write',
             delete: 'write',
             share: 'write',
@@ -69,7 +73,7 @@ describe('webagent command registration', () => {
             expect.objectContaining({ name: 'data', valueRequired: true, multiple: true }),
             expect.objectContaining({ name: 'data-file', valueRequired: true, multiple: true }),
         ]));
-        expect(ask.columns).toEqual(['response', 'session_id', 'url', 'files']);
+        expect(ask.columns).toEqual(['response', 'session_id', 'url', 'files', 'receipt', 'artifacts', 'evolve', 'next_actions']);
     });
 
     it('keeps runtime-visible arguments for projects', () => {
@@ -91,7 +95,27 @@ describe('webagent command registration', () => {
             expect.objectContaining({ name: 'turns', type: 'int', default: 20 }),
             expect.objectContaining({ name: 'timeout', type: 'int', default: 120 }),
         ]));
-        expect(clarify.columns).toEqual(['status', 'session_id', 'submitted', 'response']);
+        expect(clarify.columns).toEqual(['status', 'session_id', 'url', 'submitted', 'response', 'receipt', 'artifacts', 'evolve', 'next_actions']);
+    });
+
+    it('keeps runtime-visible arguments for receipt and evolve', () => {
+        const receipt = getRegistry().get('webagent/receipt');
+        expect(receipt.args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+            expect.objectContaining({ name: 'turns', type: 'int', default: 10 }),
+        ]));
+        expect(receipt.columns).toEqual(['session_id', 'url', 'receipt', 'response', 'artifacts', 'evolve', 'next_actions']);
+
+        const evolve = getRegistry().get('webagent/evolve');
+        expect(evolve.args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+            expect.objectContaining({ name: 'later', type: 'boolean', default: false }),
+            expect.objectContaining({ name: 'force', type: 'boolean', default: false }),
+            expect.objectContaining({ name: 'skip-check', type: 'boolean', default: false }),
+            expect.objectContaining({ name: 'turns', type: 'int', default: 10 }),
+            expect.objectContaining({ name: 'timeout', type: 'int', default: 300 }),
+        ]));
+        expect(evolve.columns).toEqual(['status', 'session_id', 'url', 'response', 'credits', 'artifacts', 'evolve', 'next_actions']);
     });
 
     it('keeps runtime-visible arguments for session management commands', () => {

@@ -5,6 +5,8 @@ import {
     createSession,
     ensureAssistantResponse,
     parseBoolFlag,
+    parseWebAgentFeedback,
+    receiptOutputFields,
     requireNonEmptyPrompt,
     requirePositiveInt,
     sendToSession,
@@ -31,7 +33,7 @@ export const askCommand = cli({
         { name: 'data', valueRequired: true, multiple: true, help: 'Attach inline text data as a generated .txt file' },
         { name: 'data-file', valueRequired: true, multiple: true, help: 'Attach a local data file' },
     ],
-    columns: ['response', 'session_id', 'url', 'files'],
+    columns: ['response', 'session_id', 'url', 'files', 'receipt', 'artifacts', 'evolve', 'next_actions'],
     func: async (page, kwargs) => {
         const prompt = requireNonEmptyPrompt(kwargs.prompt, 'webagent');
         const timeoutSeconds = requirePositiveInt(
@@ -63,11 +65,17 @@ export const askCommand = cli({
                 dataFiles: kwargs['data-file'],
             });
         const response = ensureAssistantResponse(result, 'webagent ask');
+        const feedback = parseWebAgentFeedback(response);
+        const receipt = receiptOutputFields(result.sessionId || null, feedback);
         return [{
-            response,
+            response: feedback.cleanText || response,
             session_id: result.sessionId || null,
-            url: result.sessionId ? `https://agent.famou.com/chat/${result.sessionId}` : null,
+            url: receipt.url,
             files: result.files?.map((file) => file.name).join(', ') || null,
+            receipt: receipt.receipt,
+            artifacts: receipt.artifacts,
+            evolve: receipt.evolve,
+            next_actions: receipt.next_actions,
         }];
     },
 });

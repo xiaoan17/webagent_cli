@@ -120,6 +120,11 @@ export function parseSessionId(input) {
     return candidate;
 }
 
+export function sessionUrl(id) {
+    const sessionId = String(id || '').trim();
+    return sessionId ? `${WEBAGENT_URL}chat/${encodeURIComponent(sessionId)}` : WEBAGENT_URL;
+}
+
 export async function isOnWebAgent(page) {
     const url = await page.evaluate('window.location.href').catch(() => '');
     if (typeof url !== 'string' || !url) return false;
@@ -316,6 +321,47 @@ export async function cancelSession(page, id) {
     return sessionId;
 }
 
+export async function checkEvolution(page, id) {
+    const sessionId = parseSessionId(id);
+    let payload;
+    try {
+        payload = await browserJsonFetch(page, `console/v1/sessions/${encodeURIComponent(sessionId)}/evolve/check`, {
+            method: 'POST',
+            body: {},
+        });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/\b404\b/.test(message)) {
+            return {
+                sessionId,
+                status: 'check_unavailable',
+                canStart: true,
+                message: 'Evolution credit check endpoint was unavailable; WebAgent UI starts evolution without this check.',
+            };
+        }
+        throw error;
+    }
+    const code = String(payload?.code ?? '');
+    const data = payload?.data || {};
+    if (code === '-1' && data) {
+        return {
+            sessionId,
+            status: 'insufficient_credits',
+            canStart: false,
+            requiredCredits: data.required_credits ?? data.requiredCredits ?? 80,
+            availableCredits: data.available_credits ?? data.availableCredits ?? 0,
+            message: payload?.message || payload?.msg || '余额不足，无法启动演化',
+        };
+    }
+    ensureWebAgentSuccess(payload, 'webagent evolve check');
+    return {
+        sessionId,
+        status: 'available',
+        canStart: true,
+        message: payload?.message || payload?.msg || '',
+    };
+}
+
 export async function renameSession(page, id, title) {
     const sessionId = parseSessionId(id);
     const text = requireNonEmptyPrompt(title, 'webagent rename');
@@ -468,6 +514,98 @@ export async function sendToSession(page, id, prompt, options = {}) {
     await registerSessionFiles(page, sessionId, upload.files);
     const result = await postStream(page, `console/v1/sessions/${encodeURIComponent(sessionId)}/events`, body, options.timeoutSeconds || 120, sessionId);
     return { ...result, files: upload.files };
+}
+
+export async function getSessionReceipt(page, id, options = {}) {
+    const turns = options.turns === undefined ? 10 : requirePositiveInt(
+        Number(options.turns),
+        'webagent receipt --turns',
+        'Example: opencli webagent receipt <id> --turns 10',
+    );
+    const session = await getSession(page, id, { turns });
+    const latest = latestAssistantMessage(session);
+    if (!latest) {
+        throw new EmptyResultError('webagent receipt', `No assistant receipt found in WebAgent session ${session.id}.`);
+    }
+    const feedback = parseWebAgentFeedback(latest.text);
+    return {
+        session,
+        feedback,
+        message: latest,
+        ...receiptOutputFields(session.id, feedback),
+    };
+}
+
+export async function startEvolution(page, id, options = {}) {
+    const sessionId = parseSessionId(id);
+    const turns = options.turns === undefined ? 10 : requirePositiveInt(
+        Number(options.turns),
+        'webagent evolve --turns',
+        'Example: opencli webagent evolve <id> --turns 10',
+    );
+    const timeoutSeconds = requirePositiveInt(
+        Number(options.timeoutSeconds ?? 300),
+        'webagent evolve --timeout',
+        'Example: opencli webagent evolve <id> --timeout 300',
+    );
+    const force = parseBoolFlag(options.force, false);
+    const skipCheck = parseBoolFlag(options.skipCheck, false);
+    const session = await getSession(page, sessionId, { turns }).catch(() => null);
+    const latestText = latestAssistantMessage(session)?.text || '';
+    const feedback = parseWebAgentFeedback(latestText);
+    if (!feedback.evolution.available && !force) {
+        throw new EmptyResultError(
+            'webagent evolve',
+            `No deep-evolution suggestion found in WebAgent session ${sessionId}. Re-run with --force to send /evolve anyway.`,
+        );
+    }
+    const creditCheck = skipCheck ? null : await checkEvolution(page, sessionId);
+    if (creditCheck && !creditCheck.canStart) {
+        return {
+            sessionId,
+            status: creditCheck.status,
+            creditCheck,
+            response: '',
+            feedback,
+            submitMode: 'check',
+        };
+    }
+    const previousUserCount = session ? normalizeSessionMessages(session).filter((message) => message.role === 'user').length : 0;
+    const uiResult = await clickEvolutionActionInPage(page, sessionId, 'start')
+        .catch((error) => ({ ok: false, reason: error instanceof Error ? error.message : String(error) }));
+    if (uiResult?.ok) {
+        const response = await waitForPromptFollowup(page, sessionId, '/evolve', timeoutSeconds, previousUserCount);
+        return {
+            sessionId,
+            status: response?.response ? 'submitted' : 'submitted_pending',
+            response: response?.response || '',
+            feedback: parseWebAgentFeedback(response?.response || ''),
+            creditCheck,
+            submitMode: 'ui',
+        };
+    }
+    const result = await sendToSession(page, sessionId, '/evolve', { timeoutSeconds });
+    return {
+        ...result,
+        sessionId: result.sessionId || sessionId,
+        response: cleanWebAgentText(result.response || ''),
+        feedback: parseWebAgentFeedback(result.response || ''),
+        creditCheck,
+        submitMode: 'api',
+    };
+}
+
+export async function dismissEvolutionSuggestion(page, id) {
+    const sessionId = parseSessionId(id);
+    const uiResult = await clickEvolutionActionInPage(page, sessionId, 'later')
+        .catch((error) => ({ ok: false, reason: error instanceof Error ? error.message : String(error) }));
+    return {
+        sessionId,
+        status: uiResult?.ok ? 'dismissed' : 'dismiss_unavailable',
+        message: uiResult?.ok
+            ? 'Evolution suggestion was dismissed in the current WebAgent page.'
+            : (uiResult?.reason || 'Evolution suggestion dismiss button was not found.'),
+    };
 }
 
 export async function submitClarification(page, id, options = {}) {
@@ -1101,6 +1239,62 @@ export function normalizeSessionMessages(session) {
     return normalized;
 }
 
+export function parseWebAgentFeedback(value) {
+    const text = String(value || '');
+    const artifacts = extractArtifactsFromText(text);
+    const evolution = extractEvolutionSuggestionFromText(text);
+    return {
+        cleanText: cleanWebAgentText(text),
+        artifacts,
+        evolution,
+    };
+}
+
+export function cleanWebAgentText(value) {
+    return stripSuggestions(String(value || '')
+        .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+        .replace(/<evolve>[\s\S]*?<\/evolve>/gi, '')
+        .replace(/<artifacts>[\s\S]*?<\/artifacts>/gi, '')
+        .trim());
+}
+
+export function extractEvolutionSuggestionFromText(value) {
+    const data = extractTaggedJson(value, 'evolve');
+    const rawReasons = data && (data.reasons ?? data.result ?? data.suggestions ?? []);
+    const reasons = Array.isArray(rawReasons)
+        ? rawReasons.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+    return {
+        available: reasons.length > 0,
+        reasons,
+    };
+}
+
+export function extractArtifactsFromText(value) {
+    const data = extractTaggedJson(value, 'artifacts');
+    const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.artifacts)
+            ? data.artifacts
+            : Array.isArray(data?.files)
+                ? data.files
+                : [];
+    return list.map(normalizeArtifact).filter((item) => item.name || item.url);
+}
+
+export function receiptOutputFields(sessionId, feedback) {
+    const parsed = feedback || parseWebAgentFeedback('');
+    return {
+        response: parsed.cleanText || null,
+        session_id: sessionId || null,
+        url: sessionId ? sessionUrl(sessionId) : null,
+        receipt: summarizeReceipt(parsed),
+        artifacts: formatArtifactsForOutput(parsed.artifacts),
+        evolve: formatEvolutionForOutput(parsed.evolution),
+        next_actions: formatNextActions(sessionId, parsed),
+    };
+}
+
 export function extractClarificationFromText(value) {
     const text = String(value || '');
     const match = text.match(/<clarify>([\s\S]*?)<\/clarify>/i);
@@ -1195,6 +1389,77 @@ function findClarificationFollowup(session, submittedText, previousUserCount = 0
         .join('\n')
         .trim();
     return { response, submittedText: messages[userIndex]?.text || submittedText };
+}
+
+async function waitForPromptFollowup(page, sessionId, promptPrefix, timeoutSeconds, previousUserCount = 0) {
+    const timeoutMs = Math.max(1, Number(timeoutSeconds) || 120) * 1000;
+    const started = Date.now();
+    let last = null;
+    while (Date.now() - started < timeoutMs) {
+        await page.wait(2);
+        const session = await getSession(page, sessionId, { turns: 12 }).catch(() => null);
+        if (!session) continue;
+        last = findPromptFollowup(session, promptPrefix, previousUserCount);
+        if (last?.response) return last;
+    }
+    return last;
+}
+
+function findPromptFollowup(session, promptPrefix, previousUserCount = 0) {
+    const messages = normalizeSessionMessages(session);
+    const userIndexes = messages
+        .map((message, index) => ({ message, index }))
+        .filter((item) => item.message.role === 'user');
+    let userIndex = -1;
+    if (previousUserCount > 0 && userIndexes.length > previousUserCount) {
+        userIndex = userIndexes[previousUserCount].index;
+    }
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        if (userIndex >= 0) break;
+        const message = messages[index];
+        if (message.role === 'user' && message.text.trim().startsWith(promptPrefix)) {
+            userIndex = index;
+            break;
+        }
+    }
+    if (userIndex < 0) return null;
+    const response = messages.slice(userIndex + 1)
+        .filter((message) => message.role === 'assistant')
+        .map((message) => cleanWebAgentText(message.text))
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+    return { response, submittedText: messages[userIndex]?.text || promptPrefix };
+}
+
+async function clickEvolutionActionInPage(page, sessionId, action) {
+    await page.goto(`${WEBAGENT_URL}chat/${encodeURIComponent(sessionId)}`, { waitUntil: 'load', settleMs: 2000 });
+    await page.wait(1);
+    const label = action === 'later' ? '稍后再说' : '启动伐谋深度演化';
+    return page.evaluate((buttonLabel) => {
+        const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+        const visible = (el) => {
+            if (!(el instanceof HTMLElement)) return false;
+            const style = getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            return style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && rect.width > 0
+                && rect.height > 0;
+        };
+        const clickElement = (el) => {
+            el.scrollIntoView({ block: 'center', inline: 'center' });
+            el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+            el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+            el.click();
+        };
+        const candidates = Array.from(document.querySelectorAll('button,[role="button"]'))
+            .filter(visible)
+            .filter((el) => normalize(el.textContent || el.getAttribute('aria-label') || '').includes(buttonLabel));
+        if (!candidates.length) return { ok: false, reason: `${buttonLabel} button not found` };
+        clickElement(candidates[candidates.length - 1]);
+        return { ok: true };
+    }, label);
 }
 
 function normalizeSubmittedClarificationText(value) {
@@ -1294,6 +1559,14 @@ function splitJsonLikeQuestionBlocks(raw) {
         const end = index + 1 < starts.length ? starts[index + 1] : text.length;
         return text.slice(start, end);
     });
+}
+
+function latestAssistantMessage(session) {
+    const messages = normalizeSessionMessages(session);
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        if (messages[index].role === 'assistant' && messages[index].text) return messages[index];
+    }
+    return null;
 }
 
 function extractJsonLikeStringBeforeField(raw, field, nextField) {
@@ -1486,6 +1759,68 @@ export function normalizeProjectDetail(item) {
     };
 }
 
+function extractTaggedJson(value, tagName) {
+    const tag = escapeRegExp(tagName);
+    const match = String(value || '').match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+    if (!match) return null;
+    const raw = match[1].trim()
+        .replace(/^```(?:json)?\s*\n?/i, '')
+        .replace(/\n?```\s*$/i, '')
+        .trim();
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+}
+
+function normalizeArtifact(item) {
+    const url = String(item?.path || item?.url || item?.download_url || item?.downloadUrl || item?.link || '').trim();
+    const name = String(item?.name || item?.fileName || item?.filename || item?.title || '').trim()
+        || path.basename(url.split('?')[0] || '');
+    const size = Number(item?.size || 0);
+    return {
+        name,
+        url,
+        size: Number.isFinite(size) && size > 0 ? size : null,
+        size_text: Number.isFinite(size) && size > 0 ? formatBytes(size) : '',
+        file_id: String(item?.fileId || item?.file_id || item?.id || '').trim(),
+    };
+}
+
+function summarizeReceipt(feedback) {
+    const parts = [];
+    if (feedback.artifacts?.length) parts.push(`${feedback.artifacts.length} artifacts`);
+    if (feedback.evolution?.available) parts.push('deep_evolution_available');
+    return parts.join(', ') || null;
+}
+
+function formatArtifactsForOutput(artifacts = []) {
+    if (!artifacts.length) return null;
+    return artifacts
+        .map((artifact) => {
+            const size = artifact.size_text ? ` (${artifact.size_text})` : '';
+            return artifact.url ? `${artifact.name || 'artifact'}${size}: ${artifact.url}` : `${artifact.name}${size}`;
+        })
+        .join('\n');
+}
+
+function formatEvolutionForOutput(evolution) {
+    if (!evolution?.available) return null;
+    return evolution.reasons.map((reason, index) => `${index + 1}. ${reason}`).join('\n');
+}
+
+function formatNextActions(sessionId, feedback) {
+    if (!sessionId) return null;
+    const actions = [`webagent receipt ${sessionId}`];
+    if (feedback?.evolution?.available) {
+        actions.push(`webagent evolve ${sessionId}`);
+        actions.push(`webagent evolve ${sessionId} --later`);
+    }
+    return actions.join('\n');
+}
+
 function fileToMessageContent(file) {
     const name = file?.name || 'file';
     const extension = fileExtension(name);
@@ -1598,4 +1933,5 @@ export const __test__ = {
     fileToMessageContent,
     buildMessages,
     normalizeInlineDataText,
+    latestAssistantMessage,
 };

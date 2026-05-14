@@ -29,6 +29,9 @@ Drive **WebAgent / 产业决策智能体** ([agent.famou.com](https://agent.famo
 | `opencli webagent ask <prompt> --id <id>` | Continue an existing session and wait for the reply | write |
 | `opencli webagent send <id> <prompt>` | Send to an existing session and keep the stream open until completion | write |
 | `opencli webagent clarify <id>` | Submit default answers to the latest clarification card | write |
+| `opencli webagent receipt <id>` | Show the latest task receipt, artifact links, and suggested next actions | read |
+| `opencli webagent evolve <id>` | Start the WebAgent deep-evolution action for the latest suggestion card | write |
+| `opencli webagent evolve <id> --later` | Click the WebAgent “稍后再说” action for the latest suggestion card | write |
 | `opencli webagent new` | Open the WebAgent workspace | write |
 | `opencli webagent cancel <id>` | Cancel a running session | write |
 
@@ -63,6 +66,13 @@ opencli webagent send sess_123456789 "结合这份补充数据更新结论" --da
 # Submit answers to the latest clarification card
 opencli webagent clarify sess_123456789
 opencli webagent clarify sess_123456789 --answer 4="不对，按各门店分别往返仓库距离加总"
+
+# Show the final receipt, attached artifacts, session URL, and available follow-ups
+opencli webagent receipt sess_123456789
+
+# Start or dismiss WebAgent's deep-evolution suggestion
+opencli webagent evolve sess_123456789
+opencli webagent evolve sess_123456789 --later
 
 # Read history and details
 opencli webagent history --limit 10
@@ -124,6 +134,24 @@ opencli webagent cancel sess_123456789
 | `--turns` | Number of recent turns to inspect (default: `20`) |
 | `--timeout` | Max seconds to wait for response (default: `120`) |
 
+### `receipt`
+
+| Option | Description |
+|--------|-------------|
+| `id` | Existing session ID or chat URL |
+| `--turns` | Number of recent turns to inspect (default: `10`) |
+
+### `evolve`
+
+| Option | Description |
+|--------|-------------|
+| `id` | Existing session ID or chat URL |
+| `--later` | Click WebAgent's `稍后再说` action instead of starting deep evolution |
+| `--force` | Send `/evolve` even if no recent suggestion card is found |
+| `--skip-check` | Skip the WebAgent credit check before submitting |
+| `--turns` | Number of recent turns to inspect for an evolution suggestion (default: `10`) |
+| `--timeout` | Max seconds to wait for the evolution response (default: `300`) |
+
 ### `projects`
 
 | Option | Description |
@@ -171,9 +199,11 @@ opencli webagent cancel sess_123456789
 | `projects` | `index, name, id, file_count, skill_count, task_count, created_at, file_limit, size_limit` |
 | `history` | `index, title, id, status, project_id, updated_at, url` |
 | `read` / `detail` | `role, text` |
-| `ask` | `response, session_id, url, files` |
-| `send` | `status, session_id, response, files` |
-| `clarify` | `status, session_id, submitted, response` |
+| `ask` | `response, session_id, url, files, receipt, artifacts, evolve, next_actions` |
+| `send` | `status, session_id, url, response, files, receipt, artifacts, evolve, next_actions` |
+| `clarify` | `status, session_id, url, submitted, response, receipt, artifacts, evolve, next_actions` |
+| `receipt` | `session_id, url, receipt, response, artifacts, evolve, next_actions` |
+| `evolve` | `status, session_id, url, response, credits, artifacts, evolve, next_actions` |
 | `share` | `session_id, title, expire_days, share_url` |
 | `rename` | `status, session_id, title` |
 | `move` | `status, session_id, from_project_id, project_id` |
@@ -196,6 +226,8 @@ opencli webagent cancel sess_123456789
 
 - `ask` creates a server session only when the first prompt is submitted; `new` only opens the WebAgent workspace.
 - Most commands use WebAgent's browser-authenticated HTTP/SSE endpoints; `clarify` opens the chat page and clicks the clarification card's submit button so it matches the WebAgent UI flow.
+- `ask`, `send`, `clarify`, `receipt`, and `evolve` surface the WebAgent session URL. When WebAgent returns `<artifacts>` or `<evolve>` cards, the CLI exposes artifact download links, reasons for deep evolution, and follow-up commands.
+- `evolve` first calls WebAgent's evolution credit check endpoint, then clicks the page action when available. If the page button is not present, it falls back to sending `/evolve` to the session. `--later` is a page-local dismissal action, matching the web UI.
 - The response stream ends when WebAgent emits a terminal status (`idle`, `ended`, `failed`, or `cancelled`).
 - File upload uses WebAgent's browser-authenticated BOS upload flow. The CLI currently limits browser-side uploads to 25 MB per file.
 - `--file`, `--data-file`, and `--data` are submitted as WebAgent attachments. `--data` creates a temporary `.txt` attachment; local files are not copied into the prompt text.

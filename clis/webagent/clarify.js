@@ -2,6 +2,8 @@ import { cli, Strategy } from '@jackwener/opencli/registry';
 import {
     WEBAGENT_DOMAIN,
     ensureAssistantResponse,
+    parseWebAgentFeedback,
+    receiptOutputFields,
     requirePositiveInt,
     submitClarification,
 } from './utils.js';
@@ -24,7 +26,7 @@ export const clarifyCommand = cli({
         { name: 'turns', type: 'int', default: 20, help: 'Number of recent turns to inspect (default: 20)' },
         { name: 'timeout', type: 'int', default: 120, help: 'Max seconds to wait for response (default: 120)' },
     ],
-    columns: ['status', 'session_id', 'submitted', 'response'],
+    columns: ['status', 'session_id', 'url', 'submitted', 'response', 'receipt', 'artifacts', 'evolve', 'next_actions'],
     func: async (page, kwargs) => {
         const timeoutSeconds = requirePositiveInt(
             Number(kwargs.timeout ?? 120),
@@ -46,11 +48,18 @@ export const clarifyCommand = cli({
         const response = ['already_submitted', 'submitted_pending'].includes(result.status)
             ? (result.response || null)
             : ensureAssistantResponse(result, 'webagent clarify');
+        const feedback = parseWebAgentFeedback(response || '');
+        const receipt = receiptOutputFields(result.sessionId || kwargs.id, feedback);
         return [{
             status: result.status || 'submitted',
             session_id: result.sessionId || kwargs.id,
+            url: receipt.url,
             submitted: result.submittedText || null,
-            response,
+            response: feedback.cleanText || response,
+            receipt: receipt.receipt,
+            artifacts: receipt.artifacts,
+            evolve: receipt.evolve,
+            next_actions: receipt.next_actions,
         }];
     },
 });

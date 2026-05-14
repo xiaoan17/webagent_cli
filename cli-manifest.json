@@ -24518,7 +24518,11 @@
       "response",
       "session_id",
       "url",
-      "files"
+      "files",
+      "receipt",
+      "artifacts",
+      "evolve",
+      "next_actions"
     ],
     "type": "js",
     "modulePath": "webagent/ask.js",
@@ -24609,8 +24613,13 @@
     "columns": [
       "status",
       "session_id",
+      "url",
       "submitted",
-      "response"
+      "response",
+      "receipt",
+      "artifacts",
+      "evolve",
+      "next_actions"
     ],
     "type": "js",
     "modulePath": "webagent/clarify.js",
@@ -24676,6 +24685,74 @@
     "type": "js",
     "modulePath": "webagent/detail.js",
     "sourceFile": "webagent/detail.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "evolve",
+    "description": "Start or dismiss the latest WebAgent deep-evolution suggestion",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      },
+      {
+        "name": "later",
+        "type": "boolean",
+        "default": false,
+        "required": false,
+        "help": "Click the WebAgent \"稍后再说\" action instead of starting evolution"
+      },
+      {
+        "name": "force",
+        "type": "boolean",
+        "default": false,
+        "required": false,
+        "help": "Send /evolve even if no suggestion card is found in the recent receipt"
+      },
+      {
+        "name": "skip-check",
+        "type": "boolean",
+        "default": false,
+        "required": false,
+        "help": "Skip WebAgent evolution credit check before submitting"
+      },
+      {
+        "name": "turns",
+        "type": "int",
+        "default": 10,
+        "required": false,
+        "help": "Number of recent turns to inspect for an evolution suggestion (default: 10)"
+      },
+      {
+        "name": "timeout",
+        "type": "int",
+        "default": 300,
+        "required": false,
+        "help": "Max seconds to wait for evolution response (default: 300)"
+      }
+    ],
+    "columns": [
+      "status",
+      "session_id",
+      "url",
+      "response",
+      "credits",
+      "artifacts",
+      "evolve",
+      "next_actions"
+    ],
+    "type": "js",
+    "modulePath": "webagent/evolve.js",
+    "sourceFile": "webagent/evolve.js",
     "navigateBefore": false,
     "siteSession": "persistent"
   },
@@ -25007,6 +25084,45 @@
   },
   {
     "site": "webagent",
+    "name": "receipt",
+    "description": "Show the latest WebAgent task receipt, artifacts, and follow-up actions",
+    "access": "read",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      },
+      {
+        "name": "turns",
+        "type": "int",
+        "default": 10,
+        "required": false,
+        "help": "Number of recent turns to inspect (default: 10)"
+      }
+    ],
+    "columns": [
+      "session_id",
+      "url",
+      "receipt",
+      "response",
+      "artifacts",
+      "evolve",
+      "next_actions"
+    ],
+    "type": "js",
+    "modulePath": "webagent/receipt.js",
+    "sourceFile": "webagent/receipt.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
     "name": "rename",
     "description": "Rename a WebAgent session",
     "access": "write",
@@ -25098,8 +25214,13 @@
     "columns": [
       "status",
       "session_id",
+      "url",
       "response",
-      "files"
+      "files",
+      "receipt",
+      "artifacts",
+      "evolve",
+      "next_actions"
     ],
     "type": "js",
     "modulePath": "webagent/send.js",

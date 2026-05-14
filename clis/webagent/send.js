@@ -1,6 +1,8 @@
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import {
     WEBAGENT_DOMAIN,
+    parseWebAgentFeedback,
+    receiptOutputFields,
     requireNonEmptyPrompt,
     requirePositiveInt,
     sendToSession,
@@ -24,7 +26,7 @@ export const sendCommand = cli({
         { name: 'data', valueRequired: true, multiple: true, help: 'Attach inline text data as a generated .txt file' },
         { name: 'data-file', valueRequired: true, multiple: true, help: 'Attach a local data file' },
     ],
-    columns: ['status', 'session_id', 'response', 'files'],
+    columns: ['status', 'session_id', 'url', 'response', 'files', 'receipt', 'artifacts', 'evolve', 'next_actions'],
     func: async (page, kwargs) => {
         const prompt = requireNonEmptyPrompt(kwargs.prompt, 'webagent');
         const timeoutSeconds = requirePositiveInt(
@@ -38,11 +40,18 @@ export const sendCommand = cli({
             data: kwargs.data,
             dataFiles: kwargs['data-file'],
         });
+        const feedback = parseWebAgentFeedback(result.response || '');
+        const receipt = receiptOutputFields(result.sessionId || kwargs.id, feedback);
         return [{
             status: result.status || 'sent',
             session_id: result.sessionId || kwargs.id,
-            response: result.response || null,
+            url: receipt.url,
+            response: feedback.cleanText || result.response || null,
             files: result.files?.map((file) => file.name).join(', ') || null,
+            receipt: receipt.receipt,
+            artifacts: receipt.artifacts,
+            evolve: receipt.evolve,
+            next_actions: receipt.next_actions,
         }];
     },
 });
