@@ -13,6 +13,15 @@ Drive **WebAgent / 产业决策智能体** ([agent.famou.com](https://agent.famo
 | `opencli webagent history` | List recent sessions | read |
 | `opencli webagent read` | Read the current `/chat/<id>` session | read |
 | `opencli webagent detail <id>` | Read a session by ID or URL | read |
+| `opencli webagent share <id>` | Create a share link for a session | write |
+| `opencli webagent rename <id> <title>` | Rename a session | write |
+| `opencli webagent delete <id>` | Delete a session | write |
+| `opencli webagent move <id> --project-id <project_id>` | Move a session to a project | write |
+| `opencli webagent project-create <name>` | Create a project | write |
+| `opencli webagent project-detail <id>` | Read project details | read |
+| `opencli webagent project-rename <id> <name>` | Rename a project | write |
+| `opencli webagent project-remove-session <id> --project-id <project_id>` | Remove a session from a project | write |
+| `opencli webagent project-delete <id>` | Delete a project | write |
 | `opencli webagent ask <prompt>` | Start a session and wait for the assistant reply | write |
 | `opencli webagent ask <prompt> --data <text>` | Start a session with inline data uploaded as a text attachment | write |
 | `opencli webagent ask <prompt> --data-file <path>` | Start a session with a local data file attachment | write |
@@ -59,6 +68,19 @@ opencli webagent clarify sess_123456789 --answer 4="不对，按各门店分别�
 opencli webagent history --limit 10
 opencli webagent detail sess_123456789 --turns 10
 opencli webagent read
+
+# Manage sessions
+opencli webagent share sess_123456789
+opencli webagent rename sess_123456789 "新的任务标题"
+opencli webagent move sess_123456789 --project-id <project_id>
+opencli webagent delete sess_123456789
+
+# Manage projects
+opencli webagent project-create "供应链分析"
+opencli webagent project-detail <project_id>
+opencli webagent project-rename <project_id> "供应链分析-新版"
+opencli webagent project-remove-session sess_123456789 --project-id <project_id>
+opencli webagent project-delete <project_id>
 
 # Open a blank workspace or cancel a session
 opencli webagent new
@@ -116,6 +138,25 @@ opencli webagent cancel sess_123456789
 | `--limit` | Max sessions to list (default: `20`) |
 | `--page` | History page number (default: `1`) |
 
+### Session Management
+
+| Command | Options |
+|---------|---------|
+| `share <id>` | `--title`, `--expire-days` (default: `7`) |
+| `rename <id> <title>` | Rename a session |
+| `move <id>` | `--project-id`, optional `--from-project-id` |
+| `delete <id>` | Delete a session |
+
+### Project Management
+
+| Command | Options |
+|---------|---------|
+| `project-create <name>` | Create a project |
+| `project-detail <id>` | Read project metadata, file names, and task IDs |
+| `project-rename <id> <name>` | Rename a project |
+| `project-remove-session <id>` | `--project-id`; remove the session from that project without deleting the session |
+| `project-delete <id>` | Delete a project |
+
 ### `read` / `detail`
 
 | Option | Description |
@@ -128,11 +169,20 @@ opencli webagent cancel sess_123456789
 |---------|---------|
 | `status` | `status, login, user, session_id, url` |
 | `projects` | `index, name, id, file_count, skill_count, task_count, created_at, file_limit, size_limit` |
-| `history` | `index, title, id, status, updated_at, url` |
+| `history` | `index, title, id, status, project_id, updated_at, url` |
 | `read` / `detail` | `role, text` |
 | `ask` | `response, session_id, url, files` |
 | `send` | `status, session_id, response, files` |
 | `clarify` | `status, session_id, submitted, response` |
+| `share` | `session_id, title, expire_days, share_url` |
+| `rename` | `status, session_id, title` |
+| `move` | `status, session_id, from_project_id, project_id` |
+| `delete` | `status, session_id` |
+| `project-create` | `status, name, id` |
+| `project-detail` | `name, id, file_count, skill_count, task_count, task_ids, files` |
+| `project-rename` | `status, project_id, name` |
+| `project-remove-session` | `status, session_id, project_id` |
+| `project-delete` | `status, project_id` |
 | `new` | `status, url` |
 | `cancel` | `status, session_id` |
 

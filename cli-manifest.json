@@ -24620,6 +24620,33 @@
   },
   {
     "site": "webagent",
+    "name": "delete",
+    "description": "Delete a WebAgent session",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      }
+    ],
+    "columns": [
+      "status",
+      "session_id"
+    ],
+    "type": "js",
+    "modulePath": "webagent/delete.js",
+    "sourceFile": "webagent/delete.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
     "name": "detail",
     "description": "Read a WebAgent session by ID or URL",
     "access": "read",
@@ -24681,12 +24708,56 @@
       "title",
       "id",
       "status",
+      "project_id",
       "updated_at",
       "url"
     ],
     "type": "js",
     "modulePath": "webagent/history.js",
     "sourceFile": "webagent/history.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "move",
+    "description": "Move a WebAgent session to a project",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      },
+      {
+        "name": "project-id",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Destination WebAgent project ID"
+      },
+      {
+        "name": "from-project-id",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Current project ID, if the session is already in a project"
+      }
+    ],
+    "columns": [
+      "status",
+      "session_id",
+      "from_project_id",
+      "project_id"
+    ],
+    "type": "js",
+    "modulePath": "webagent/move.js",
+    "sourceFile": "webagent/move.js",
     "navigateBefore": false,
     "siteSession": "persistent"
   },
@@ -24706,6 +24777,163 @@
     "type": "js",
     "modulePath": "webagent/new.js",
     "sourceFile": "webagent/new.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "project-create",
+    "description": "Create a WebAgent project",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "name",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Project name"
+      }
+    ],
+    "columns": [
+      "status",
+      "name",
+      "id"
+    ],
+    "type": "js",
+    "modulePath": "webagent/project-create.js",
+    "sourceFile": "webagent/project-create.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "project-delete",
+    "description": "Delete a WebAgent project",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent project ID"
+      }
+    ],
+    "columns": [
+      "status",
+      "project_id"
+    ],
+    "type": "js",
+    "modulePath": "webagent/project-delete.js",
+    "sourceFile": "webagent/project-delete.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "project-detail",
+    "description": "Read WebAgent project details",
+    "access": "read",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent project ID"
+      }
+    ],
+    "columns": [
+      "name",
+      "id",
+      "file_count",
+      "skill_count",
+      "task_count",
+      "task_ids",
+      "files"
+    ],
+    "type": "js",
+    "modulePath": "webagent/project-detail.js",
+    "sourceFile": "webagent/project-detail.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "project-remove-session",
+    "description": "Remove a WebAgent session from a project without deleting the session",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      },
+      {
+        "name": "project-id",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Current WebAgent project ID"
+      }
+    ],
+    "columns": [
+      "status",
+      "session_id",
+      "project_id"
+    ],
+    "type": "js",
+    "modulePath": "webagent/project-remove-session.js",
+    "sourceFile": "webagent/project-remove-session.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "project-rename",
+    "description": "Rename a WebAgent project",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent project ID"
+      },
+      {
+        "name": "name",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "New project name"
+      }
+    ],
+    "columns": [
+      "status",
+      "project_id",
+      "name"
+    ],
+    "type": "js",
+    "modulePath": "webagent/project-rename.js",
+    "sourceFile": "webagent/project-rename.js",
     "navigateBefore": false,
     "siteSession": "persistent"
   },
@@ -24779,6 +25007,41 @@
   },
   {
     "site": "webagent",
+    "name": "rename",
+    "description": "Rename a WebAgent session",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      },
+      {
+        "name": "title",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "New session title"
+      }
+    ],
+    "columns": [
+      "status",
+      "session_id",
+      "title"
+    ],
+    "type": "js",
+    "modulePath": "webagent/rename.js",
+    "sourceFile": "webagent/rename.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
     "name": "send",
     "description": "Send a prompt to an existing WebAgent session",
     "access": "write",
@@ -24841,6 +25104,49 @@
     "type": "js",
     "modulePath": "webagent/send.js",
     "sourceFile": "webagent/send.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "share",
+    "description": "Create a share link for a WebAgent session",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      },
+      {
+        "name": "title",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Optional share title"
+      },
+      {
+        "name": "expire-days",
+        "type": "int",
+        "default": 7,
+        "required": false,
+        "help": "Share link validity in days (default: 7)"
+      }
+    ],
+    "columns": [
+      "session_id",
+      "title",
+      "expire_days",
+      "share_url"
+    ],
+    "type": "js",
+    "modulePath": "webagent/share.js",
+    "sourceFile": "webagent/share.js",
     "navigateBefore": false,
     "siteSession": "persistent"
   },

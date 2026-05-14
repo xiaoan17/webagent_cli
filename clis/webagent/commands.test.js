@@ -10,6 +10,15 @@ import './status.js';
 import './cancel.js';
 import './projects.js';
 import './clarify.js';
+import './rename.js';
+import './delete.js';
+import './share.js';
+import './move.js';
+import './project-create.js';
+import './project-detail.js';
+import './project-rename.js';
+import './project-delete.js';
+import './project-remove-session.js';
 
 describe('webagent command registration', () => {
     it('registers WebAgent browser commands with persistent cookie sessions', () => {
@@ -24,6 +33,15 @@ describe('webagent command registration', () => {
             cancel: 'write',
             projects: 'read',
             clarify: 'write',
+            rename: 'write',
+            delete: 'write',
+            share: 'write',
+            move: 'write',
+            'project-create': 'write',
+            'project-detail': 'read',
+            'project-rename': 'write',
+            'project-delete': 'write',
+            'project-remove-session': 'write',
         };
 
         for (const [name, access] of Object.entries(expectedAccess)) {
@@ -74,5 +92,44 @@ describe('webagent command registration', () => {
             expect.objectContaining({ name: 'timeout', type: 'int', default: 120 }),
         ]));
         expect(clarify.columns).toEqual(['status', 'session_id', 'submitted', 'response']);
+    });
+
+    it('keeps runtime-visible arguments for session management commands', () => {
+        expect(getRegistry().get('webagent/rename').args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+            expect.objectContaining({ name: 'title', positional: true, required: true }),
+        ]));
+        expect(getRegistry().get('webagent/delete').args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+        ]));
+        expect(getRegistry().get('webagent/share').args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+            expect.objectContaining({ name: 'expire-days', type: 'int', default: 7 }),
+        ]));
+        expect(getRegistry().get('webagent/move').args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+            expect.objectContaining({ name: 'project-id', valueRequired: true }),
+            expect.objectContaining({ name: 'from-project-id', valueRequired: true }),
+        ]));
+    });
+
+    it('keeps runtime-visible arguments for project management commands', () => {
+        expect(getRegistry().get('webagent/project-create').args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'name', positional: true, required: true }),
+        ]));
+        expect(getRegistry().get('webagent/project-detail').args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+        ]));
+        expect(getRegistry().get('webagent/project-rename').args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+            expect.objectContaining({ name: 'name', positional: true, required: true }),
+        ]));
+        expect(getRegistry().get('webagent/project-delete').args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+        ]));
+        expect(getRegistry().get('webagent/project-remove-session').args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+            expect.objectContaining({ name: 'project-id', valueRequired: true }),
+        ]));
     });
 });

@@ -22,7 +22,7 @@ export const historyCommand = cli({
         { name: 'limit', type: 'int', default: 20, help: 'Max sessions to list (default: 20)' },
         { name: 'page', type: 'int', default: 1, help: 'History page number (default: 1)' },
     ],
-    columns: ['index', 'title', 'id', 'status', 'updated_at', 'url'],
+    columns: ['index', 'title', 'id', 'status', 'project_id', 'updated_at', 'url'],
     func: async (page, kwargs) => {
         const limit = requirePositiveInt(
             Number(kwargs.limit ?? 20),
@@ -46,6 +46,7 @@ export const historyCommand = cli({
             title: session.title || '(untitled)',
             id: session.id,
             status: session.status || null,
+            project_id: session.projectId || null,
             updated_at: session.updatedAt || session.createdAt || null,
             url: session.url,
         }));

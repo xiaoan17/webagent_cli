@@ -228,6 +228,13 @@ function mapFetchResult(result, label) {
     return body;
 }
 
+function ensureWebAgentSuccess(payload, commandName) {
+    const code = payload?.code;
+    if (code === undefined || code === null || code === '0' || code === 0) return;
+    const message = payload?.message || payload?.msg || payload?.error?.message || payload?.error || `${commandName} failed with code ${code}`;
+    throw new CommandExecutionError(String(message));
+}
+
 export async function checkLoginStatus(page) {
     const payload = await browserJsonFetch(page, 'console/v1/oauth/is_login');
     return Boolean(payload?.data?.isLogin ?? payload?.data?.is_login ?? payload?.isLogin);
@@ -247,8 +254,12 @@ export async function listProjects(page, { pageNo = 1, pageSize = 100 } = {}) {
     const data = payload?.data ?? payload;
     const list = Array.isArray(data?.projects)
         ? data.projects
+        : Array.isArray(data?.data?.projects)
+            ? data.data.projects
         : Array.isArray(data?.list)
             ? data.list
+            : Array.isArray(data?.data)
+                ? data.data
             : Array.isArray(data?.items)
                 ? data.items
                 : Array.isArray(data)
@@ -260,19 +271,22 @@ export async function listProjects(page, { pageNo = 1, pageSize = 100 } = {}) {
 export async function listSessions(page, { limit = 20, pageNo = 1 } = {}) {
     const pageSize = requirePositiveInt(limit, 'webagent history --limit', 'Example: opencli webagent history --limit 20');
     const pageIndex = requirePositiveInt(pageNo, 'webagent history --page', 'Example: opencli webagent history --page 1');
+    const offset = (pageIndex - 1) * pageSize;
     const payload = await browserJsonFetch(page, 'console/v1/sessions/list', {
-        searchParams: { page: pageIndex, page_size: pageSize },
+        searchParams: { limit: pageSize, offset },
     });
     const data = payload?.data ?? payload;
-    const list = Array.isArray(data?.list)
-        ? data.list
+    const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.data)
+            ? data.data
         : Array.isArray(data?.sessions)
             ? data.sessions
+            : Array.isArray(data?.list)
+                ? data.list
             : Array.isArray(data?.items)
                 ? data.items
-                : Array.isArray(data)
-                    ? data
-                    : [];
+                : [];
     return list.map(normalizeSessionSummary).filter((item) => item.id);
 }
 
@@ -300,6 +314,128 @@ export async function cancelSession(page, id) {
         body: {},
     });
     return sessionId;
+}
+
+export async function renameSession(page, id, title) {
+    const sessionId = parseSessionId(id);
+    const text = requireNonEmptyPrompt(title, 'webagent rename');
+    const payload = await browserJsonFetch(page, `console/v1/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'PATCH',
+        body: { title: text },
+    });
+    ensureWebAgentSuccess(payload, 'webagent rename');
+    return { sessionId, title: text };
+}
+
+export async function deleteSession(page, id) {
+    const sessionId = parseSessionId(id);
+    const payload = await browserJsonFetch(page, `console/v1/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+    });
+    ensureWebAgentSuccess(payload, 'webagent delete');
+    return sessionId;
+}
+
+export async function shareSession(page, id, options = {}) {
+    const sessionId = parseSessionId(id);
+    let title = String(options.title || '').trim();
+    if (!title) {
+        const session = await getSession(page, sessionId, { turns: 1, excludeEvents: true }).catch(() => null);
+        title = session?.title || '';
+    }
+    const expireDays = requirePositiveInt(options.expireDays ?? 7, 'webagent share --expire-days', 'Example: opencli webagent share <id> --expire-days 7');
+    const payload = await browserJsonFetch(page, 'console/v1/share/create', {
+        method: 'POST',
+        body: {
+            session_id: sessionId,
+            title,
+            expire_days: expireDays,
+        },
+    });
+    ensureWebAgentSuccess(payload, 'webagent share');
+    const data = payload?.data ?? payload;
+    const shareUrl = String(data?.share_url || data?.shareUrl || data?.url || data?.link || '').trim();
+    if (!shareUrl) {
+        throw new EmptyResultError('webagent share', `No share URL returned for WebAgent session ${sessionId}.`);
+    }
+    return { sessionId, title, expireDays, shareUrl };
+}
+
+export async function moveSessionToProject(page, id, options = {}) {
+    const sessionId = parseSessionId(id);
+    const toProjectId = String(options.projectId || options.toProjectId || '').trim();
+    if (!toProjectId) {
+        throw new ArgumentError('webagent move --project-id is required', 'Example: opencli webagent move <session_id> --project-id <project_id>');
+    }
+    const fromProjectId = String(options.fromProjectId || options.project_id || '').trim();
+    const payload = await browserJsonFetch(page, 'console/v1/project/moveTask', {
+        method: 'POST',
+        body: {
+            projectId: fromProjectId,
+            toProjectId,
+            sessionId,
+        },
+    });
+    ensureWebAgentSuccess(payload, 'webagent move');
+    return { sessionId, fromProjectId, projectId: toProjectId };
+}
+
+export async function removeSessionFromProject(page, id, options = {}) {
+    const sessionId = parseSessionId(id);
+    const projectId = String(options.projectId || '').trim();
+    if (!projectId) {
+        throw new ArgumentError('webagent project-remove-session --project-id is required', 'Example: opencli webagent project-remove-session <session_id> --project-id <project_id>');
+    }
+    const payload = await browserJsonFetch(page, 'console/v1/project/edit', {
+        method: 'POST',
+        body: {
+            projectId,
+            delete: [{ type: 'task', id: sessionId }],
+        },
+    });
+    ensureWebAgentSuccess(payload, 'webagent project-remove-session');
+    return { sessionId, projectId };
+}
+
+export async function createProject(page, name) {
+    const projectName = requireNonEmptyPrompt(name, 'webagent project-create');
+    const payload = await browserJsonFetch(page, 'console/v1/project/create', {
+        method: 'POST',
+        body: { projectName },
+    });
+    ensureWebAgentSuccess(payload, 'webagent project-create');
+    const data = payload?.data ?? payload;
+    return normalizeProjectSummary({ ...data, projectName: data?.projectName || data?.name || projectName });
+}
+
+export async function getProject(page, id) {
+    const projectId = requireNonEmptyPrompt(id, 'webagent project-detail');
+    const payload = await browserJsonFetch(page, 'console/v1/project/detail', {
+        searchParams: { projectId },
+    });
+    ensureWebAgentSuccess(payload, 'webagent project-detail');
+    const data = payload?.data ?? payload;
+    return normalizeProjectDetail({ ...data, projectId: data?.projectId || data?.id || projectId });
+}
+
+export async function renameProject(page, id, name) {
+    const projectId = requireNonEmptyPrompt(id, 'webagent project-rename');
+    const rename = requireNonEmptyPrompt(name, 'webagent project-rename');
+    const payload = await browserJsonFetch(page, 'console/v1/project/edit', {
+        method: 'POST',
+        body: { projectId, rename },
+    });
+    ensureWebAgentSuccess(payload, 'webagent project-rename');
+    return { projectId, name: rename };
+}
+
+export async function deleteProject(page, id) {
+    const projectId = requireNonEmptyPrompt(id, 'webagent project-delete');
+    const payload = await browserJsonFetch(page, `console/v1/project/delete?projectId=${encodeURIComponent(projectId)}`, {
+        method: 'DELETE',
+    });
+    ensureWebAgentSuccess(payload, 'webagent project-delete');
+    return projectId;
 }
 
 function buildMessages(prompt, files = []) {
@@ -1295,6 +1431,9 @@ export function normalizeSessionDetail(data, fallbackId = '') {
         id,
         title,
         status,
+        project_id: String(session.projectId || session.project_id || '').trim(),
+        created_at: String(session.created_at || session.createdAt || session.started_at || '').trim(),
+        updated_at: String(session.updated_at || session.updatedAt || session.completed_at || '').trim(),
         url: id ? `${WEBAGENT_URL}chat/${id}` : WEBAGENT_URL,
         messages: normalizeSessionMessages(session),
         raw: session,
@@ -1307,6 +1446,7 @@ function normalizeSessionSummary(item) {
         id,
         title: String(item?.title || item?.name || '').trim(),
         status: String(item?.status || '').trim(),
+        projectId: String(item?.projectId || item?.project_id || '').trim(),
         createdAt: String(item?.created_at || item?.createdAt || item?.started_at || '').trim(),
         updatedAt: String(item?.updated_at || item?.updatedAt || item?.completed_at || '').trim(),
         url: id ? `${WEBAGENT_URL}chat/${id}` : '',
@@ -1326,6 +1466,23 @@ export function normalizeProjectSummary(item) {
         created_at: String(item?.createTime || item?.created_at || item?.createdAt || '').trim(),
         file_limit: item?.limit?.fileCount ?? null,
         size_limit: item?.limit?.fileSize ? formatBytes(item.limit.fileSize) : null,
+    };
+}
+
+export function normalizeProjectDetail(item) {
+    const summary = normalizeProjectSummary(item);
+    const tasks = Array.isArray(item?.tasks) ? item.tasks : [];
+    const knowledge = Array.isArray(item?.knowledge) ? item.knowledge : [];
+    return {
+        ...summary,
+        task_ids: tasks
+            .map((task) => String(task?.sessionId || task?.session_id || task?.id || '').trim())
+            .filter(Boolean)
+            .join(', '),
+        files: knowledge
+            .map((file) => String(file?.fileName || file?.filename || file?.name || '').trim())
+            .filter(Boolean)
+            .join(', '),
     };
 }
 
