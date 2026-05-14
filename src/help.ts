@@ -183,6 +183,7 @@ function compactArg(arg: Arg): Record<string, unknown> {
     ...(arg.positional ? { positional: true } : {}),
     ...(arg.required ? { required: true } : {}),
     ...(arg.valueRequired ? { valueRequired: true } : {}),
+    ...(arg.multiple ? { multiple: true } : {}),
     ...(arg.default !== undefined ? { default: arg.default } : {}),
     ...(arg.choices?.length ? { choices: arg.choices } : {}),
     ...(arg.help ? { help: arg.help } : {}),

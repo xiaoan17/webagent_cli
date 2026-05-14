@@ -23,6 +23,7 @@ export interface ManifestEntry {
     default?: unknown;
     required?: boolean;
     valueRequired?: boolean;
+    multiple?: boolean;
     positional?: boolean;
     help?: string;
     choices?: string[];

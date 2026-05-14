@@ -15,8 +15,6 @@ export const WEBAGENT_API_BASE = 'https://pro-service.famou.com';
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 const MAX_BROWSER_UPLOAD_BYTES = 25 * 1024 * 1024;
-const MAX_INLINE_DATA_BYTES = 64 * 1024;
-const INLINE_DATA_EXTENSIONS = new Set(['csv', 'tsv', 'txt', 'md', 'json', 'jsonl', 'log', 'yaml', 'yml']);
 const SESSION_DONE_STATUSES = new Set(['idle', 'ended', 'failed', 'cancelled']);
 const EVENT_TYPE_MAP = {
     thinking: 'agent/thinking',
@@ -155,19 +153,32 @@ export async function getCurrentSessionId(page) {
 async function browserJsonFetch(page, path, options = {}) {
     await ensureOnWebAgent(page);
     const result = await page.evaluate(async (apiPath, fetchOptions) => {
+        const safeCookie = () => {
+            try {
+                return document.cookie || '';
+            } catch {
+                return '';
+            }
+        };
         const searchParams = fetchOptions.searchParams || null;
         const qs = searchParams && Object.keys(searchParams).length
             ? '?' + new URLSearchParams(Object.entries(searchParams)
                 .filter(([, value]) => value !== undefined && value !== null && value !== '')
                 .map(([key, value]) => [key, String(value)])).toString()
             : '';
+        const proxyUrl = (apiPath) => {
+            const origin = (location.origin && location.origin !== 'null')
+                ? location.origin
+                : 'https://agent.famou.com';
+            return `${origin}/proxyApi/${apiPath.replace(/^\/+/, '')}`;
+        };
         const url = apiPath.startsWith('http')
             ? apiPath + qs
-            : '/proxyApi/' + apiPath.replace(/^\/+/, '') + qs;
+            : proxyUrl(apiPath) + qs;
         const headers = {
             'Accept': 'application/json',
             'x-bce-request-id': (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
-            'x-cookie': document.cookie || '',
+            'x-cookie': safeCookie(),
             ...(fetchOptions.headers || {}),
         };
         const init = {
@@ -304,11 +315,10 @@ function buildMessages(prompt, files = []) {
 export async function createSession(page, prompt, options = {}) {
     const id = String(options.uploadId || '').trim() || createUploadId();
     const upload = await prepareUploadAttachments(page, id, options);
-    const promptWithData = appendInlineDataToPrompt(prompt, upload.inlineData);
     const body = {
         id,
         config: { agent_type: options.agentType || 'opencode' },
-        messages: buildMessages(promptWithData, upload.files),
+        messages: buildMessages(prompt, upload.files),
         ...(options.projectId ? { project_id: String(options.projectId).trim() } : {}),
     };
     const result = await postStream(page, 'console/v1/sessions/create', body, options.timeoutSeconds || 120, id, upload.files);
@@ -318,11 +328,162 @@ export async function createSession(page, prompt, options = {}) {
 export async function sendToSession(page, id, prompt, options = {}) {
     const sessionId = parseSessionId(id);
     const upload = await prepareUploadAttachments(page, sessionId, options);
-    const promptWithData = appendInlineDataToPrompt(prompt, upload.inlineData);
-    const body = { messages: buildMessages(promptWithData, upload.files) };
+    const body = { messages: buildMessages(prompt, upload.files) };
     await registerSessionFiles(page, sessionId, upload.files);
     const result = await postStream(page, `console/v1/sessions/${encodeURIComponent(sessionId)}/events`, body, options.timeoutSeconds || 120, sessionId);
     return { ...result, files: upload.files };
+}
+
+export async function submitClarification(page, id, options = {}) {
+    const session = await getSession(page, id, { turns: options.turns ?? 20 });
+    const pending = findLatestClarification(session);
+    if (!pending?.clarification) {
+        throw new EmptyResultError('webagent clarify', `No clarification card found in WebAgent session ${session.id}.`);
+    }
+    if (pending.submitted && !parseBoolFlag(options.force, false)) {
+        return {
+            sessionId: session.id,
+            status: 'already_submitted',
+            clarification: pending.clarification,
+            submittedText: pending.nextUserText || '',
+            response: '',
+        };
+    }
+    const answers = parseClarificationAnswerOverrides(options.answers, pending.clarification);
+    const submittedText = buildClarificationSubmission(pending.clarification, answers, options.note);
+    const previousUserCount = normalizeSessionMessages(session).filter((message) => message.role === 'user').length;
+    const uiResult = await submitClarificationInPage(page, session.id, pending.clarification, answers, options.note)
+        .catch((error) => ({ ok: false, reason: error instanceof Error ? error.message : String(error) }));
+    if (uiResult?.ok) {
+        const response = await waitForClarificationFollowup(
+            page,
+            session.id,
+            submittedText,
+            options.timeoutSeconds || 120,
+            previousUserCount,
+        );
+        return {
+            sessionId: session.id,
+            status: response?.response ? 'submitted' : 'submitted_pending',
+            submittedText: response?.submittedText || uiResult.submittedText || submittedText,
+            response: response?.response || '',
+            events: [],
+            clarification: pending.clarification,
+            submitMode: 'ui',
+        };
+    }
+    const result = await sendToSession(page, session.id, submittedText, {
+        timeoutSeconds: options.timeoutSeconds || 120,
+    });
+    return {
+        ...result,
+        clarification: pending.clarification,
+        submittedText,
+        submitMode: 'api',
+    };
+}
+
+async function submitClarificationInPage(page, sessionId, clarification, answers = {}, note = '') {
+    await page.goto(`${WEBAGENT_URL}chat/${encodeURIComponent(sessionId)}`, { waitUntil: 'load', settleMs: 2000 });
+    await page.wait(1);
+    return page.evaluate((clarificationData, answerData, noteText) => {
+        const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+        const visible = (el) => {
+            if (!(el instanceof HTMLElement)) return false;
+            const style = getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            return style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && rect.width > 0
+                && rect.height > 0;
+        };
+        const shortNeedle = (value) => {
+            const text = normalize(value);
+            return text.length > 28 ? text.slice(0, 28) : text;
+        };
+        const clickElement = (el) => {
+            el.scrollIntoView({ block: 'center', inline: 'center' });
+            el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+            el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+            el.click();
+        };
+        const candidateButtons = Array.from(document.querySelectorAll('button,[role="button"]'))
+            .filter(visible)
+            .filter((el) => {
+                const text = normalize(el.textContent || el.getAttribute('aria-label') || '');
+                return text === '提交' || text.includes('提交');
+            });
+        if (!candidateButtons.length) return { ok: false, reason: 'clarification submit button not found' };
+
+        const questions = Array.isArray(clarificationData?.questions) ? clarificationData.questions : [];
+        const markers = [
+            clarificationData?.title,
+            ...questions.flatMap((question) => [question.label, question.default, ...(question.options || [])]),
+        ].map(shortNeedle).filter((item) => item.length >= 4);
+        let best = null;
+        for (const button of candidateButtons) {
+            let node = button;
+            let bestNode = button;
+            let bestScore = 0;
+            for (let depth = 0; node && depth < 12; depth += 1, node = node.parentElement) {
+                const text = normalize(node.textContent);
+                const score = markers.reduce((total, marker) => total + (text.includes(marker) ? 1 : 0), 0);
+                if (score >= bestScore) {
+                    bestScore = score;
+                    bestNode = node;
+                }
+            }
+            if (!best || bestScore > best.score) best = { button, container: bestNode, score: bestScore };
+        }
+        if (!best?.button) return { ok: false, reason: 'clarification submit button not resolved' };
+
+        const container = best.container || document.body;
+        for (const question of questions) {
+            const key = String(question.id ?? '');
+            const oneBased = String(Number(key) + 1);
+            const raw = answerData?.[key] ?? answerData?.[oneBased];
+            const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
+            for (const value of values.map(shortNeedle).filter(Boolean)) {
+                const option = Array.from(container.querySelectorAll('button,[role="button"],label,[aria-label]'))
+                    .filter(visible)
+                    .find((el) => normalize(el.textContent || el.getAttribute('aria-label') || '').includes(value));
+                if (option) clickElement(option);
+            }
+        }
+        const note = normalize(noteText);
+        if (note) {
+            const noteTarget = Array.from(container.querySelectorAll('textarea,input,[contenteditable="true"]'))
+                .filter(visible)
+                .find((el) => /补充|说明|描述|其他|备注|note/i.test(normalize(el.getAttribute('placeholder') || el.getAttribute('aria-label') || '')))
+                || Array.from(container.querySelectorAll('textarea,input,[contenteditable="true"]')).filter(visible).pop();
+            if (noteTarget) {
+                noteTarget.focus();
+                if (noteTarget instanceof HTMLTextAreaElement || noteTarget instanceof HTMLInputElement) {
+                    noteTarget.value = note;
+                } else {
+                    noteTarget.textContent = note;
+                }
+                noteTarget.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: note }));
+                noteTarget.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+        clickElement(best.button);
+        return { ok: true, submittedText: '' };
+    }, clarification, answers, note);
+}
+
+async function waitForClarificationFollowup(page, sessionId, submittedText, timeoutSeconds, previousUserCount = 0) {
+    const timeoutMs = Math.max(1, Number(timeoutSeconds) || 120) * 1000;
+    const started = Date.now();
+    let last = null;
+    while (Date.now() - started < timeoutMs) {
+        await page.wait(2);
+        const session = await getSession(page, sessionId, { turns: 8 }).catch(() => null);
+        if (!session) continue;
+        last = findClarificationFollowup(session, submittedText, previousUserCount);
+        if (last?.response) return last;
+    }
+    return last;
 }
 
 export async function postStream(page, path, body, timeoutSeconds = 120, knownSessionId = '', filesToRegister = []) {
@@ -330,11 +491,29 @@ export async function postStream(page, path, body, timeoutSeconds = 120, knownSe
     const result = await page.evaluate(async (apiBase, apiPath, requestBody, timeoutMs, suppliedSessionId, registerFiles) => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
-        const url = apiBase.replace(/\/+$/, '') + '/' + apiPath.replace(/^\/+/, '');
+        let raw = '';
+        let sessionId = suppliedSessionId || '';
+        let serverId = '';
+        const proxyUrl = (apiPath) => {
+            const origin = (location.origin && location.origin !== 'null')
+                ? location.origin
+                : 'https://agent.famou.com';
+            return `${origin}/proxyApi/${apiPath.replace(/^\/+/, '')}`;
+        };
+        const url = apiPath.startsWith('http')
+            ? apiPath
+            : proxyUrl(apiPath);
         const requestId = () => (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+        const safeCookie = () => {
+            try {
+                return document.cookie || '';
+            } catch {
+                return '';
+            }
+        };
         const authHeaders = () => ({
             'x-bce-request-id': requestId(),
-            'x-cookie': document.cookie || '',
+            'x-cookie': safeCookie(),
         });
         try {
             const response = await fetch(url, {
@@ -348,9 +527,8 @@ export async function postStream(page, path, body, timeoutSeconds = 120, knownSe
                 },
                 body: requestBody ? JSON.stringify(requestBody) : undefined,
             });
-            const sessionId = response.headers.get('X-Session-ID') || suppliedSessionId || '';
-            const serverId = response.headers.get('X-Server-ID') || '';
-            let raw = '';
+            sessionId = response.headers.get('X-Session-ID') || suppliedSessionId || '';
+            serverId = response.headers.get('X-Server-ID') || '';
             if (!response.ok) {
                 const text = await response.text().catch(() => '');
                 let data = null;
@@ -426,9 +604,9 @@ export async function postStream(page, path, body, timeoutSeconds = 120, knownSe
             return { ok: true, status: response.status, statusText: response.statusText, sessionId, serverId, raw };
         } catch (err) {
             if (err && err.name === 'AbortError') {
-                return { ok: false, aborted: true, message: 'timeout', sessionId: suppliedSessionId || '' };
+                return { ok: false, aborted: true, message: 'timeout', sessionId, serverId, raw };
             }
-            return { ok: false, status: 0, message: err instanceof Error ? err.message : String(err), sessionId: suppliedSessionId || '' };
+            return { ok: false, status: 0, message: err instanceof Error ? err.message : String(err), sessionId, serverId, raw };
         } finally {
             clearTimeout(timer);
         }
@@ -438,6 +616,17 @@ export async function postStream(page, path, body, timeoutSeconds = 120, knownSe
         throw new TimeoutError('webagent response', timeoutSeconds);
     }
     if (!result?.ok) {
+        const interruptedEvents = parseSseEvents(result.raw || '', result.sessionId || knownSessionId);
+        const interruptedText = extractAssistantTextFromEvents(interruptedEvents);
+        if (interruptedText || interruptedEvents.length) {
+            return {
+                sessionId: result.sessionId || knownSessionId,
+                serverId: result.serverId || '',
+                events: interruptedEvents,
+                response: interruptedText,
+                status: lastSessionStatus(interruptedEvents) || 'interrupted',
+            };
+        }
         mapStreamFailure(result, path);
     }
     const events = parseSseEvents(result.raw || '', result.sessionId || knownSessionId);
@@ -466,15 +655,15 @@ function mapStreamFailure(result, label) {
 }
 
 export async function prepareUploadAttachments(page, uploadId, options = {}) {
-    const { inputs, inlineData } = collectUploadInputs(options);
-    if (!inputs.length) return { files: [], inlineData };
+    const inputs = collectUploadInputs(options);
+    if (!inputs.length) return { files: [] };
 
     const uploaded = [];
     try {
         for (const input of inputs) {
             uploaded.push(await uploadWebAgentFile(page, uploadId, input));
         }
-        return { files: uploaded, inlineData };
+        return { files: uploaded };
     } finally {
         for (const input of inputs) {
             if (input.temp) fs.rmSync(input.path, { force: true });
@@ -484,24 +673,19 @@ export async function prepareUploadAttachments(page, uploadId, options = {}) {
 
 function collectUploadInputs(options = {}) {
     const inputs = [];
-    const inlineData = [];
     for (const filePath of normalizeArrayOption(options.files)) {
         inputs.push({ ...requireReadableFile(filePath, '--file'), source: '--file' });
     }
     for (const dataPath of normalizeArrayOption(options.dataFiles)) {
-        const input = { ...requireReadableFile(dataPath, '--data-file'), source: '--data-file' };
-        inputs.push(input);
-        const inline = readInlineDataFile(input);
-        if (inline) inlineData.push(inline);
+        inputs.push({ ...requireReadableFile(dataPath, '--data-file'), source: '--data-file' });
     }
     for (const [index, data] of normalizeArrayOption(options.data).entries()) {
         const text = normalizeInlineDataText(data);
         if (!text.trim()) continue;
         const input = writeTempDataFile(text, index);
         inputs.push(input);
-        inlineData.push({ name: input.name, source: '--data', text });
     }
-    return { inputs, inlineData };
+    return inputs;
 }
 
 async function uploadWebAgentFile(page, uploadId, input) {
@@ -510,10 +694,23 @@ async function uploadWebAgentFile(page, uploadId, input) {
     const base64 = data.toString('base64');
     const mimeType = mimeTypeForFile(input.name);
     const result = await page.evaluate(async (apiBase, jobId, fileName, fileType, fileSize, b64) => {
+        const safeCookie = () => {
+            try {
+                return document.cookie || '';
+            } catch {
+                return '';
+            }
+        };
         const apiJson = async (apiPath, options = {}) => {
+            const proxyUrl = (apiPath) => {
+                const origin = (location.origin && location.origin !== 'null')
+                    ? location.origin
+                    : 'https://agent.famou.com';
+                return `${origin}/proxyApi/${apiPath.replace(/^\/+/, '')}`;
+            };
             const url = apiPath.startsWith('http')
                 ? apiPath
-                : '/proxyApi/' + apiPath.replace(/^\/+/, '');
+                : proxyUrl(apiPath);
             const response = await fetch(url, {
                 method: options.method || 'GET',
                 credentials: 'include',
@@ -521,7 +718,7 @@ async function uploadWebAgentFile(page, uploadId, input) {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                     'x-bce-request-id': (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
-                    'x-cookie': document.cookie || '',
+                    'x-cookie': safeCookie(),
                     ...(options.headers || {}),
                 },
                 body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -534,13 +731,48 @@ async function uploadWebAgentFile(page, uploadId, input) {
             }
             return { ok: true, status: response.status, data };
         };
+        const waitForBosSdk = async () => {
+            if (globalThis.baidubce?.sdk?.BosClient) return true;
+            const src = 'https://bce.bdstatic.com/lib/@baiducloud/sdk/1.0.8-beta.2/baidubce-sdk.bundle.min.js';
+            try {
+                await new Promise((resolve, reject) => {
+                    const existing = document.querySelector(`script[src="${src}"]`);
+                    if (existing) {
+                        existing.addEventListener('load', resolve, { once: true });
+                        existing.addEventListener('error', reject, { once: true });
+                    } else {
+                        const script = document.createElement('script');
+                        script.src = src;
+                        script.onload = resolve;
+                        script.onerror = reject;
+                        document.head.appendChild(script);
+                    }
+                    const started = Date.now();
+                    const poll = () => {
+                        if (globalThis.baidubce?.sdk?.BosClient) {
+                            resolve();
+                            return;
+                        }
+                        if (Date.now() - started > 10000) {
+                            reject(new Error('Baidu BOS SDK load timed out'));
+                            return;
+                        }
+                        setTimeout(poll, 100);
+                    };
+                    poll();
+                });
+            } catch {
+                return false;
+            }
+            return Boolean(globalThis.baidubce?.sdk?.BosClient);
+        };
         const role = await apiJson(`console/v1/sessions/assume_role/${encodeURIComponent(jobId)}?source=1`);
         if (!role.ok) return { ok: false, stage: 'assume_role', ...role };
         const roleData = role.data?.data || role.data || {};
         const endpoint = roleData.endpoint || 'https://bj.bcebos.com';
         const bucket = roleData.bucketName || 'fm-online';
         const prefix = roleData.prefix || 'fm-console';
-        if (!globalThis.baidubce?.sdk?.BosClient) {
+        if (!await waitForBosSdk()) {
             return { ok: false, stage: 'sdk', message: 'Baidu BOS SDK is not loaded on WebAgent page' };
         }
         const client = new globalThis.baidubce.sdk.BosClient({
@@ -580,7 +812,10 @@ async function uploadWebAgentFile(page, uploadId, input) {
         }
         throw new CommandExecutionError(`WebAgent file upload failed for ${input.name}: ${message}`);
     }
-    return result;
+    return {
+        ...result,
+        source: input.source || '',
+    };
 }
 
 async function registerSessionFiles(page, sessionId, files = []) {
@@ -689,6 +924,14 @@ export function isSessionDoneStatus(status) {
 }
 
 export function normalizeSessionMessages(session) {
+    if (Array.isArray(session?.messages) && session.messages.length) {
+        return session.messages
+            .map((message) => ({
+                role: String(message?.role || '').toLowerCase(),
+                text: String(message?.text ?? message?.content ?? '').trim(),
+            }))
+            .filter((message) => ['user', 'assistant'].includes(message.role) && message.text);
+    }
     const events = Array.isArray(session?.events) ? session.events : [];
     const mapped = events.map((event) => ({
         id: event.event_id ?? event.id,
@@ -720,6 +963,287 @@ export function normalizeSessionMessages(session) {
     }
     flushAssistant();
     return normalized;
+}
+
+export function extractClarificationFromText(value) {
+    const text = String(value || '');
+    const match = text.match(/<clarify>([\s\S]*?)<\/clarify>/i);
+    if (!match) return null;
+    const raw = match[1].trim();
+    let data = null;
+    try {
+        const normalized = normalizeClarificationJson(raw
+            .replace(/^```(?:json)?\s*\n?/i, '')
+            .replace(/\n?```\s*$/i, '')
+            .trim());
+        const parsed = JSON.parse(normalized);
+        if (parsed?.title && Array.isArray(parsed.questions)) {
+            data = {
+                title: String(parsed.title),
+                questions: parsed.questions.map((question, index) => normalizeClarificationQuestion(question, index)),
+            };
+        }
+    } catch {
+        data = fallbackParseClarification(raw);
+    }
+    if (!data?.questions?.length) return null;
+    return {
+        data,
+        raw,
+        cleanContent: text.replace(/<clarify>[\s\S]*?<\/clarify>/gi, '').trim(),
+    };
+}
+
+export function buildClarificationSubmission(clarification, answers = {}, note = '') {
+    if (!clarification?.questions?.length) {
+        throw new ArgumentError('clarification data is missing questions');
+    }
+    const lines = clarification.questions.map((question) => {
+        const answer = answers[question.id] ?? answers[String(Number(question.id) + 1)] ?? defaultClarificationAnswers(question);
+        const selected = normalizeClarificationAnswer(answer, question.multi);
+        return `${question.label}：${selected.length ? selected.join('、') : '（跳过）'}`;
+    });
+    const extra = String(note || '').trim();
+    if (extra) lines.push(`补充说明：${extra}`);
+    return lines.join('\n');
+}
+
+export function findLatestClarification(session) {
+    const messages = normalizeSessionMessages(session);
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message.role !== 'assistant') continue;
+        const parsed = extractClarificationFromText(message.text);
+        if (!parsed?.data) continue;
+        const nextUser = messages.slice(index + 1).find((item) => item.role === 'user');
+        const submitted = Boolean(nextUser?.text && parseClarificationSubmittedAnswers(nextUser.text, parsed.data.questions));
+        return {
+            clarification: parsed.data,
+            assistantIndex: index,
+            submitted,
+            nextUserText: nextUser?.text || '',
+        };
+    }
+    return null;
+}
+
+function findClarificationFollowup(session, submittedText, previousUserCount = 0) {
+    const messages = normalizeSessionMessages(session);
+    const target = normalizeSubmittedClarificationText(submittedText);
+    let userIndex = -1;
+    const userIndexes = messages
+        .map((message, index) => ({ message, index }))
+        .filter((item) => item.message.role === 'user');
+    if (previousUserCount > 0 && userIndexes.length > previousUserCount) {
+        userIndex = userIndexes[previousUserCount].index;
+    }
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        if (userIndex >= 0) break;
+        const message = messages[index];
+        if (message.role !== 'user') continue;
+        const normalized = normalizeSubmittedClarificationText(message.text);
+        if (normalized === target || normalized === '已提交') {
+            userIndex = index;
+            break;
+        }
+    }
+    if (userIndex < 0) {
+        const pending = findLatestClarification(session);
+        if (pending?.submitted) userIndex = messages.findIndex((message) => message.text === pending.nextUserText);
+    }
+    if (userIndex < 0) return null;
+    const response = messages.slice(userIndex + 1)
+        .filter((message) => message.role === 'assistant')
+        .map((message) => message.text)
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+    return { response, submittedText: messages[userIndex]?.text || submittedText };
+}
+
+function normalizeSubmittedClarificationText(value) {
+    return String(value || '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').trim();
+}
+
+function parseClarificationSubmittedAnswers(text, questions) {
+    const parsed = {};
+    const lines = String(text || '').split(/\r?\n/);
+    for (const question of questions || []) {
+        const line = lines.find((line) => line.includes(`${question.label}：`) || line.includes(`${question.label}:`));
+        if (!line) continue;
+        const zhIndex = line.indexOf(`${question.label}：`);
+        const enIndex = line.indexOf(`${question.label}:`);
+        const offset = zhIndex === -1
+            ? enIndex + `${question.label}:`.length
+            : zhIndex + `${question.label}：`.length;
+        const value = line.slice(offset).trim();
+        parsed[question.id] = value && value !== '（跳过）'
+            ? normalizeClarificationAnswer(value, question.multi)
+            : [];
+    }
+    return Object.keys(parsed).length ? parsed : null;
+}
+
+function normalizeClarificationJson(value) {
+    let text = '';
+    let inString = false;
+    let escaped = false;
+    for (const char of String(value || '')) {
+        if (escaped) {
+            text += char;
+            escaped = false;
+        } else if (inString && char === '\\') {
+            text += char;
+            escaped = true;
+        } else if (char === '"') {
+            text += char;
+            inString = !inString;
+        } else if (!inString && char === '，') {
+            text += ',';
+        } else {
+            text += char;
+        }
+    }
+    return text;
+}
+
+function normalizeClarificationQuestion(question, index) {
+    return {
+        id: String(question?.id ?? index),
+        label: String(question?.label || '').trim(),
+        hint: question?.hint ? String(question.hint) : undefined,
+        multi: Boolean(question?.multi),
+        options: Array.isArray(question?.options) ? question.options.map((item) => String(item)) : [],
+        default: question?.default == null ? undefined : String(question.default),
+    };
+}
+
+function fallbackParseClarification(raw) {
+    const text = String(raw || '');
+    const title = extractJsonLikeStringBeforeField(text, 'title', 'questions')
+        || text.match(/"title"\s*[：:]\s*"([^"]+)"/)?.[1];
+    if (!title) return null;
+    const questions = [];
+    const blocks = splitJsonLikeQuestionBlocks(text);
+    for (let index = 0; index < blocks.length; index += 1) {
+        const block = blocks[index];
+        const label = extractJsonLikeStringBeforeField(block, 'label', 'multi')
+            || extractJsonLikeStringBeforeField(block, 'label', 'options')
+            || block.match(/"label"\s*[：:]\s*"([^"]+)"/)?.[1];
+        if (!label) continue;
+        questions.push({
+            id: String(index),
+            label: unescapeJsonLikeString(label),
+            multi: block.match(/"multi"\s*[：:]\s*true/) != null,
+            options: extractJsonLikeStringArray(block, 'options'),
+            default: unescapeJsonLikeString(
+                extractJsonLikeStringBeforeField(block, 'default', null)
+                || block.match(/"default"\s*[：:]\s*"([^"]*)"/)?.[1]
+                || '',
+            ) || undefined,
+        });
+    }
+    return questions.length ? { title: unescapeJsonLikeString(title), questions } : null;
+}
+
+function splitJsonLikeQuestionBlocks(raw) {
+    const text = String(raw || '');
+    const starts = [];
+    const labelRe = /"label"\s*[：:]\s*"/g;
+    let match;
+    while ((match = labelRe.exec(text)) !== null) {
+        starts.push(match.index);
+    }
+    return starts.map((start, index) => {
+        const end = index + 1 < starts.length ? starts[index + 1] : text.length;
+        return text.slice(start, end);
+    });
+}
+
+function extractJsonLikeStringBeforeField(raw, field, nextField) {
+    const text = String(raw || '');
+    const fieldMatch = new RegExp(`"${escapeRegExp(field)}"\\s*[：:]\\s*"`).exec(text);
+    if (!fieldMatch) return '';
+    const start = fieldMatch.index + fieldMatch[0].length;
+    if (nextField) {
+        const nextMatch = new RegExp(`"\\s*[,，]\\s*\\r?\\n?\\s*"${escapeRegExp(nextField)}"\\s*[：:]`).exec(text.slice(start));
+        if (nextMatch) return text.slice(start, start + nextMatch.index);
+    }
+    const tail = text.slice(start);
+    const endMatch = /"\s*(?:[,，]\s*\r?\n?\s*"|[}\]])/.exec(tail);
+    if (!endMatch) return '';
+    return tail.slice(0, endMatch.index);
+}
+
+function extractJsonLikeStringArray(raw, field) {
+    const text = String(raw || '');
+    const arrayMatch = new RegExp(`"${escapeRegExp(field)}"\\s*[：:]\\s*\\[([\\s\\S]*?)\\]`).exec(text);
+    if (!arrayMatch) return [];
+    const options = [];
+    const optionRe = /"((?:[^"\\]|\\.)*)"/g;
+    let match;
+    while ((match = optionRe.exec(arrayMatch[1])) !== null) {
+        options.push(unescapeJsonLikeString(match[1]));
+    }
+    return options;
+}
+
+function unescapeJsonLikeString(value) {
+    return String(value || '').trim()
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t');
+}
+
+function escapeRegExp(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function defaultClarificationAnswers(question) {
+    if (question.default) return [question.default];
+    return question.multi ? [] : question.options?.[0] ? [question.options[0]] : [];
+}
+
+function normalizeClarificationAnswer(answer, multi = false) {
+    if (answer == null || answer === '') return [];
+    const values = Array.isArray(answer)
+        ? answer
+        : multi
+            ? String(answer).split(/[、,]/)
+            : [answer];
+    return values.map((item) => String(item).trim()).filter(Boolean);
+}
+
+function parseClarificationAnswerOverrides(rawAnswers, clarification) {
+    const parsed = {};
+    for (const raw of normalizeArrayOption(rawAnswers)) {
+        const text = String(raw || '').trim();
+        if (!text) continue;
+        const match = text.match(/^(\d+|[^=：:]+)\s*[=：:]\s*([\s\S]+)$/);
+        if (!match) {
+            throw new ArgumentError(
+                `Invalid --answer value: ${text}`,
+                'Use --answer 1=选项文本 or --answer "完整问题=选项文本".',
+            );
+        }
+        const key = match[1].trim();
+        const value = match[2].trim();
+        const question = resolveClarificationQuestion(clarification, key);
+        parsed[question.id] = normalizeClarificationAnswer(value, question.multi);
+    }
+    return parsed;
+}
+
+function resolveClarificationQuestion(clarification, key) {
+    const questions = clarification?.questions || [];
+    const numeric = Number(key);
+    if (Number.isInteger(numeric) && numeric >= 1 && numeric <= questions.length) {
+        return questions[numeric - 1];
+    }
+    const found = questions.find((question) => question.id === key || question.label === key || question.label.includes(key));
+    if (found) return found;
+    throw new ArgumentError(`Unknown clarification question: ${key}`);
 }
 
 function eventTypeForHistory(type, payload) {
@@ -831,53 +1355,12 @@ function normalizeArrayOption(value) {
     return Array.isArray(value) ? value.filter((item) => item != null && item !== '') : [value];
 }
 
-function readInlineDataFile(input) {
-    if (!input?.path || input.size > MAX_INLINE_DATA_BYTES) return null;
-    if (!INLINE_DATA_EXTENSIONS.has(fileExtension(input.name))) return null;
-    let text = '';
-    try {
-        text = fs.readFileSync(input.path, 'utf8');
-    } catch {
-        return null;
-    }
-    if (!text.trim()) return null;
-    return { name: input.name, source: input.source || '--data-file', text };
-}
-
 function normalizeInlineDataText(value) {
     const text = String(value ?? '');
     if (!text.includes('\n') && text.includes('\\n')) {
         return text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\t/g, '\t');
     }
     return text;
-}
-
-function appendInlineDataToPrompt(prompt, inlineData = []) {
-    const snippets = inlineData
-        .filter((item) => item && String(item.text || '').trim())
-        .map((item) => formatInlineDataBlock(item));
-    if (!snippets.length) return prompt;
-    return [
-        prompt,
-        '',
-        'The following data was supplied through OpenCLI. Use it as part of the user request:',
-        '',
-        snippets.join('\n\n'),
-    ].join('\n');
-}
-
-function formatInlineDataBlock(item) {
-    const name = sanitizeInlineDataLabel(item.name || 'data');
-    const source = sanitizeInlineDataLabel(item.source || 'data');
-    return [
-        `----- BEGIN CLI DATA: ${name} (${source}) -----`,
-        String(item.text || '').trimEnd(),
-        `----- END CLI DATA: ${name} -----`,
-    ].join('\n');
-}
-
-function sanitizeInlineDataLabel(value) {
-    return String(value || '').replace(/[\r\n]/g, ' ').slice(0, 160);
 }
 
 function writeTempDataFile(text, index) {
@@ -956,6 +1439,6 @@ export const __test__ = {
     normalizeSessionSummary,
     normalizeProjectSummary,
     fileToMessageContent,
-    appendInlineDataToPrompt,
+    buildMessages,
     normalizeInlineDataText,
 };

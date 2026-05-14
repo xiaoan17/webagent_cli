@@ -20,9 +20,9 @@ export const sendCommand = cli({
         { name: 'id', positional: true, required: true, help: 'WebAgent session ID or https://agent.famou.com/chat/<id> URL' },
         { name: 'prompt', positional: true, required: true, help: 'Prompt to send' },
         { name: 'timeout', type: 'int', default: 120, help: 'Max seconds to keep the stream open (default: 120)' },
-        { name: 'file', valueRequired: true, help: 'Attach a local file' },
-        { name: 'data', valueRequired: true, help: 'Attach inline text data as a generated .txt file' },
-        { name: 'data-file', valueRequired: true, help: 'Attach a local data file' },
+        { name: 'file', valueRequired: true, multiple: true, help: 'Attach a local file' },
+        { name: 'data', valueRequired: true, multiple: true, help: 'Attach inline text data as a generated .txt file' },
+        { name: 'data-file', valueRequired: true, multiple: true, help: 'Attach a local data file' },
     ],
     columns: ['status', 'session_id', 'response', 'files'],
     func: async (page, kwargs) => {

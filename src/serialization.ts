@@ -15,6 +15,7 @@ export type SerializedArg = {
   type: string;
   required: boolean;
   valueRequired: boolean;
+  multiple: boolean;
   positional: boolean;
   choices: string[];
   default: unknown;
@@ -28,6 +29,7 @@ export function serializeArg(a: Arg): SerializedArg {
     type: a.type ?? 'string',
     required: !!a.required,
     valueRequired: !!a.valueRequired,
+    multiple: !!a.multiple,
     positional: !!a.positional,
     choices: a.choices ?? [],
     default: a.default ?? null,

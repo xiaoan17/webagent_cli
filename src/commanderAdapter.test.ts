@@ -209,6 +209,50 @@ describe('commanderAdapter value-required optional options', () => {
   });
 });
 
+describe('commanderAdapter multiple options', () => {
+  const cmd: CliCommand = {
+    site: 'webagent',
+    name: 'ask', access: 'write',
+    description: 'Ask WebAgent',
+    browser: true,
+    args: [
+      { name: 'prompt', positional: true, required: true, help: 'Prompt' },
+      { name: 'data-file', valueRequired: true, multiple: true, help: 'Attach a data file' },
+    ],
+    func: vi.fn(),
+  };
+
+  beforeEach(() => {
+    mockExecuteCommand.mockReset();
+    mockExecuteCommand.mockResolvedValue([]);
+    mockRenderOutput.mockReset();
+    delete process.env.OPENCLI_VERBOSE;
+    process.exitCode = undefined;
+  });
+
+  it('collects repeated option values into an array', async () => {
+    const program = new Command();
+    const siteCmd = program.command('webagent');
+    registerCommandToProgram(siteCmd, cmd);
+
+    await program.parseAsync([
+      'node',
+      'opencli',
+      'webagent',
+      'ask',
+      'check files',
+      '--data-file',
+      'customers.csv',
+      '--data-file',
+      'schedule_options.csv',
+    ]);
+
+    expect(mockExecuteCommand).toHaveBeenCalled();
+    const kwargs = mockExecuteCommand.mock.calls[0][1];
+    expect(kwargs['data-file']).toEqual(['customers.csv', 'schedule_options.csv']);
+  });
+});
+
 describe('commanderAdapter command aliases', () => {
   const cmd: CliCommand = {
     site: 'notebooklm',

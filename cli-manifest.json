@@ -24494,6 +24494,7 @@
         "type": "str",
         "required": false,
         "valueRequired": true,
+        "multiple": true,
         "help": "Attach a local file"
       },
       {
@@ -24501,6 +24502,7 @@
         "type": "str",
         "required": false,
         "valueRequired": true,
+        "multiple": true,
         "help": "Attach inline text data as a generated .txt file"
       },
       {
@@ -24508,6 +24510,7 @@
         "type": "str",
         "required": false,
         "valueRequired": true,
+        "multiple": true,
         "help": "Attach a local data file"
       }
     ],
@@ -24547,6 +24550,71 @@
     "type": "js",
     "modulePath": "webagent/cancel.js",
     "sourceFile": "webagent/cancel.js",
+    "navigateBefore": false,
+    "siteSession": "persistent"
+  },
+  {
+    "site": "webagent",
+    "name": "clarify",
+    "description": "Submit answers to the latest WebAgent clarification card",
+    "access": "write",
+    "domain": "agent.famou.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "id",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "WebAgent session ID or https://agent.famou.com/chat/<id> URL"
+      },
+      {
+        "name": "answer",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "multiple": true,
+        "help": "Override a clarification answer, e.g. --answer 1=是"
+      },
+      {
+        "name": "note",
+        "type": "str",
+        "required": false,
+        "valueRequired": true,
+        "help": "Optional extra note appended as 补充说明"
+      },
+      {
+        "name": "force",
+        "type": "boolean",
+        "default": false,
+        "required": false,
+        "help": "Submit even if the latest clarification already has a following user answer"
+      },
+      {
+        "name": "turns",
+        "type": "int",
+        "default": 20,
+        "required": false,
+        "help": "Number of recent turns to inspect (default: 20)"
+      },
+      {
+        "name": "timeout",
+        "type": "int",
+        "default": 120,
+        "required": false,
+        "help": "Max seconds to wait for response (default: 120)"
+      }
+    ],
+    "columns": [
+      "status",
+      "session_id",
+      "submitted",
+      "response"
+    ],
+    "type": "js",
+    "modulePath": "webagent/clarify.js",
+    "sourceFile": "webagent/clarify.js",
     "navigateBefore": false,
     "siteSession": "persistent"
   },
@@ -24744,6 +24812,7 @@
         "type": "str",
         "required": false,
         "valueRequired": true,
+        "multiple": true,
         "help": "Attach a local file"
       },
       {
@@ -24751,6 +24820,7 @@
         "type": "str",
         "required": false,
         "valueRequired": true,
+        "multiple": true,
         "help": "Attach inline text data as a generated .txt file"
       },
       {
@@ -24758,6 +24828,7 @@
         "type": "str",
         "required": false,
         "valueRequired": true,
+        "multiple": true,
         "help": "Attach a local data file"
       }
     ],

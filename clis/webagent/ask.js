@@ -27,9 +27,9 @@ export const askCommand = cli({
         { name: 'new', type: 'boolean', default: true, help: 'Start a new session when --id is not provided (default: true)' },
         { name: 'project-id', help: 'Optional WebAgent project_id to attach to a new session' },
         { name: 'agent-type', default: 'opencode', help: 'WebAgent config.agent_type for new sessions (default: opencode)' },
-        { name: 'file', valueRequired: true, help: 'Attach a local file' },
-        { name: 'data', valueRequired: true, help: 'Attach inline text data as a generated .txt file' },
-        { name: 'data-file', valueRequired: true, help: 'Attach a local data file' },
+        { name: 'file', valueRequired: true, multiple: true, help: 'Attach a local file' },
+        { name: 'data', valueRequired: true, multiple: true, help: 'Attach inline text data as a generated .txt file' },
+        { name: 'data-file', valueRequired: true, multiple: true, help: 'Attach a local data file' },
     ],
     columns: ['response', 'session_id', 'url', 'files'],
     func: async (page, kwargs) => {

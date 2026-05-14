@@ -52,8 +52,12 @@ export function registerCommandToProgram(siteCmd: Command, cmd: CliCommand): voi
     } else {
       const expectsValue = arg.required || arg.valueRequired;
       const flag = expectsValue ? `--${arg.name} <value>` : `--${arg.name} [value]`;
-      if (arg.required) subCmd.requiredOption(flag, arg.help ?? '');
-      else if (arg.default != null) subCmd.option(flag, arg.help ?? '', String(arg.default));
+      const collect = arg.multiple
+        ? (value: string, previous: string[] = []) => [...previous, value]
+        : undefined;
+      if (arg.required) subCmd.requiredOption(flag, arg.help ?? '', collect as never);
+      else if (arg.default != null) subCmd.option(flag, arg.help ?? '', collect as never, arg.multiple ? [] : String(arg.default));
+      else if (arg.multiple) subCmd.option(flag, arg.help ?? '', collect as never, []);
       else subCmd.option(flag, arg.help ?? '');
     }
   }

@@ -9,6 +9,7 @@ import './new.js';
 import './status.js';
 import './cancel.js';
 import './projects.js';
+import './clarify.js';
 
 describe('webagent command registration', () => {
     it('registers WebAgent browser commands with persistent cookie sessions', () => {
@@ -22,6 +23,7 @@ describe('webagent command registration', () => {
             status: 'read',
             cancel: 'write',
             projects: 'read',
+            clarify: 'write',
         };
 
         for (const [name, access] of Object.entries(expectedAccess)) {
@@ -45,9 +47,9 @@ describe('webagent command registration', () => {
             expect.objectContaining({ name: 'id' }),
             expect.objectContaining({ name: 'project-id' }),
             expect.objectContaining({ name: 'agent-type', default: 'opencode' }),
-            expect.objectContaining({ name: 'file', valueRequired: true }),
-            expect.objectContaining({ name: 'data', valueRequired: true }),
-            expect.objectContaining({ name: 'data-file', valueRequired: true }),
+            expect.objectContaining({ name: 'file', valueRequired: true, multiple: true }),
+            expect.objectContaining({ name: 'data', valueRequired: true, multiple: true }),
+            expect.objectContaining({ name: 'data-file', valueRequired: true, multiple: true }),
         ]));
         expect(ask.columns).toEqual(['response', 'session_id', 'url', 'files']);
     });
@@ -59,5 +61,18 @@ describe('webagent command registration', () => {
             expect.objectContaining({ name: 'page', type: 'int', default: 1 }),
         ]));
         expect(projects.columns).toEqual(['index', 'name', 'id', 'file_count', 'skill_count', 'task_count', 'created_at', 'file_limit', 'size_limit']);
+    });
+
+    it('keeps runtime-visible arguments for clarify', () => {
+        const clarify = getRegistry().get('webagent/clarify');
+        expect(clarify.args).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'id', positional: true, required: true }),
+            expect.objectContaining({ name: 'answer', valueRequired: true, multiple: true }),
+            expect.objectContaining({ name: 'note', valueRequired: true }),
+            expect.objectContaining({ name: 'force', type: 'boolean', default: false }),
+            expect.objectContaining({ name: 'turns', type: 'int', default: 20 }),
+            expect.objectContaining({ name: 'timeout', type: 'int', default: 120 }),
+        ]));
+        expect(clarify.columns).toEqual(['status', 'session_id', 'submitted', 'response']);
     });
 });

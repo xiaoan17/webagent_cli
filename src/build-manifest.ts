@@ -80,6 +80,7 @@ function toManifestArgs(args: CliCommand['args']): ManifestEntry['args'] {
     default: arg.default,
     required: !!arg.required,
     valueRequired: !!arg.valueRequired || undefined,
+    multiple: !!arg.multiple || undefined,
     positional: arg.positional || undefined,
     help: arg.help ?? '',
     choices: arg.choices,

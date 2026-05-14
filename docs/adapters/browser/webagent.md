@@ -19,6 +19,7 @@ Drive **WebAgent / 产业决策智能体** ([agent.famou.com](https://agent.famo
 | `opencli webagent ask <prompt> --file <path>` | Start a session with a local file attachment | write |
 | `opencli webagent ask <prompt> --id <id>` | Continue an existing session and wait for the reply | write |
 | `opencli webagent send <id> <prompt>` | Send to an existing session and keep the stream open until completion | write |
+| `opencli webagent clarify <id>` | Submit default answers to the latest clarification card | write |
 | `opencli webagent new` | Open the WebAgent workspace | write |
 | `opencli webagent cancel <id>` | Cancel a running session | write |
 
@@ -49,6 +50,10 @@ opencli webagent ask "基于项目资料继续分析" --project-id <project_id>
 opencli webagent ask "继续细化交付步骤" --id sess_123456789
 opencli webagent send https://agent.famou.com/chat/sess_123456789 "停止当前方向，改成成本优先"
 opencli webagent send sess_123456789 "结合这份补充数据更新结论" --data-file ./update.csv
+
+# Submit answers to the latest clarification card
+opencli webagent clarify sess_123456789
+opencli webagent clarify sess_123456789 --answer 4="不对，按各门店分别往返仓库距离加总"
 
 # Read history and details
 opencli webagent history --limit 10
@@ -86,6 +91,17 @@ opencli webagent cancel sess_123456789
 | `--data` | Inline text data to upload as a generated `.txt` attachment |
 | `--data-file` | Local data file to upload and attach |
 
+### `clarify`
+
+| Option | Description |
+|--------|-------------|
+| `id` | Existing session ID or chat URL |
+| `--answer` | Optional answer override in `question=value` form; question can be 1-based index or label |
+| `--note` | Optional extra note appended as `补充说明` |
+| `--force` | Submit even if the latest clarification already has a following user answer |
+| `--turns` | Number of recent turns to inspect (default: `20`) |
+| `--timeout` | Max seconds to wait for response (default: `120`) |
+
 ### `projects`
 
 | Option | Description |
@@ -116,6 +132,7 @@ opencli webagent cancel sess_123456789
 | `read` / `detail` | `role, text` |
 | `ask` | `response, session_id, url, files` |
 | `send` | `status, session_id, response, files` |
+| `clarify` | `status, session_id, submitted, response` |
 | `new` | `status, url` |
 | `cancel` | `status, session_id` |
 
@@ -128,7 +145,7 @@ opencli webagent cancel sess_123456789
 ## Notes
 
 - `ask` creates a server session only when the first prompt is submitted; `new` only opens the WebAgent workspace.
-- This adapter uses WebAgent's browser-authenticated HTTP/SSE endpoints rather than clicking the React UI.
+- Most commands use WebAgent's browser-authenticated HTTP/SSE endpoints; `clarify` opens the chat page and clicks the clarification card's submit button so it matches the WebAgent UI flow.
 - The response stream ends when WebAgent emits a terminal status (`idle`, `ended`, `failed`, or `cancelled`).
 - File upload uses WebAgent's browser-authenticated BOS upload flow. The CLI currently limits browser-side uploads to 25 MB per file.
-- `--data` and small text-like `--data-file` inputs (`csv`, `tsv`, `txt`, `md`, `json`, `yaml`, `log`, up to 64 KB) are also embedded into the prompt so the model can use them immediately while the uploaded file record is still preserved.
+- `--file`, `--data-file`, and `--data` are submitted as WebAgent attachments. `--data` creates a temporary `.txt` attachment; local files are not copied into the prompt text.
